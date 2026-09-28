@@ -1,0 +1,7 @@
+export RISH_APPLICATION_ID=com.termux
+DIR="$HOME/ProyectosTermux/netguard"
+PAUSA_AVION=2
+PAUSA_RED=15
+NUMERO="+00000000000"
+PALABRA="reiniciar"
+INTERVALO_SMS=4
