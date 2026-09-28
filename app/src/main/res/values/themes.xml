@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Moon" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/moon_accent</item>
+        <item name="android:windowBackground">@color/moon_bg</item>
+        <item name="android:statusBarColor">@color/moon_bg</item>
+        <item name="android:navigationBarColor">@color/moon_bg</item>
+    </style>
+</resources>

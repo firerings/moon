@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="moon_bg">#0B0E1A</color>
+    <color name="moon_card">#151A2E</color>
+    <color name="moon_chip">#1E2440</color>
+    <color name="moon_accent">#8AB4FF</color>
+    <color name="moon_text">#E8ECF8</color>
+    <color name="moon_muted">#8A93B2</color>
+    <color name="moon_ok">#5BD9A1</color>
+    <color name="moon_bad">#FF6B7A</color>
+</resources>

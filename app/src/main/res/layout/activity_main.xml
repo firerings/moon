@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/moon_bg"
+    android:fitsSystemWindows="true"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Moon"
+            android:textColor="@color/moon_text"
+            android:textSize="30sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvEstado"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/chip_bg"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="6dp"
+            android:text="Conectando…"
+            android:textColor="@color/moon_muted"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="20dp"
+        android:layout_marginBottom="12dp"
+        android:layout_weight="1"
+        app:cardBackgroundColor="@color/moon_card"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="0dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:padding="20dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Transcripción"
+                    android:textColor="@color/moon_muted"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/btnLimpiar"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:padding="4dp"
+                    android:text="Limpiar"
+                    android:textColor="@color/moon_accent"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <ScrollView
+                android:id="@+id/scroll"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="12dp"
+                android:layout_weight="1">
+
+                <TextView
+                    android:id="@+id/tvHist"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:lineSpacingExtra="4dp"
+                    android:textColor="@color/moon_text"
+                    android:textSize="18sp" />
+            </ScrollView>
+
+            <TextView
+                android:id="@+id/tvParcial"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:minLines="2"
+                android:textColor="@color/moon_accent"
+                android:textSize="18sp"
+                android:textStyle="italic" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="130dp">
+
+        <View
+            android:id="@+id/pulso"
+            android:layout_width="84dp"
+            android:layout_height="84dp"
+            android:layout_gravity="center"
+            android:alpha="0"
+            android:background="@drawable/pulse_bg" />
+
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/fab"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_mic"
+            app:backgroundTint="@color/moon_accent"
+            app:fabCustomSize="76dp"
+            app:maxImageSize="32dp" />
+    </FrameLayout>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="Toca el micrófono y habla"
+        android:textColor="@color/moon_muted"
+        android:textSize="13sp" />
+</LinearLayout>
