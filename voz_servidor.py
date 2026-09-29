@@ -1,4 +1,4 @@
-import json, subprocess, threading
+import json, subprocess, threading, os, re, secrets, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from vosk import Model, KaldiRecognizer, SetLogLevel
@@ -6,8 +6,33 @@ from vosk import Model, KaldiRecognizer, SetLogLevel
 SetLogLevel(-1)
 MODEL = "/storage/emulated/0/Download/ProyectosTermux/Models/vosk-model-small-es-0.42"
 PORT = 8765
+DIR = os.path.expanduser("~/ProyectosTermux/netguard")
+TF = os.path.join(DIR, ".token")
+if not os.path.exists(TF):
+    open(TF, "w").write(secrets.token_hex(8))
+    os.chmod(TF, 0o600)
+TOKEN = open(TF).read().strip()
 
-E = {"escuchando": False, "parcial": "", "finales": [], "n": 0}
+
+def pausa(n, d):
+    try:
+        return int(re.search(n + r"=(\d+)", open(os.path.join(DIR, "config.sh")).read()).group(1))
+    except Exception:
+        return d
+
+
+def orden_vista():
+    o = E["orden"]
+    if not o:
+        return None
+    el = time.time() - o["t0"]
+    a, r = pausa("PAUSA_AVION", 2), pausa("PAUSA_RED", 15)
+    if el > a + r + 22:
+        return None
+    paso = 1 if el < a + 1 else (2 if el < a + 1 + r else 3)
+    return {"nombre": "Reiniciar conexión", "paso": paso, "hecho": el > a + r + 6}
+
+E = {"escuchando": False, "parcial": "", "finales": [], "n": 0, "orden": None}
 lock = threading.Lock()
 parar = threading.Event()
 
@@ -25,6 +50,10 @@ def agregar(texto):
         E["n"] += 1
         E["finales"].append({"n": E["n"], "t": texto})
         E["finales"] = E["finales"][-50:]
+        o = E["orden"]
+        if "reinici" in texto.lower() and (not o or time.time() - o["t0"] > 60):
+            E["orden"] = {"t0": time.time()}
+            subprocess.Popen([DIR + "/reiniciar.sh"])
 
 
 def escuchar():
@@ -62,18 +91,29 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
 
+    def _auth(self):
+        if self.headers.get("X-Moon-Token") == TOKEN:
+            return True
+        self._j({"auth": False}, 401)
+        return False
+
     def do_GET(self):
+        if not self._auth():
+            return
         u = urlparse(self.path)
         if u.path == "/estado":
             d = int(parse_qs(u.query).get("desde", ["0"])[0])
             with lock:
                 self._j({"escuchando": E["escuchando"], "parcial": E["parcial"],
                          "total": E["n"],
-                         "finales": [f for f in E["finales"] if f["n"] > d]})
+                         "finales": [f for f in E["finales"] if f["n"] > d],
+                         "orden": orden_vista()})
         else:
             self._j({"error": "no existe"}, 404)
 
     def do_POST(self):
+        if not self._auth():
+            return
         if self.path == "/escuchar":
             with lock:
                 ya = E["escuchando"]
@@ -96,5 +136,6 @@ class H(BaseHTTPRequestHandler):
 preparar_audio()
 print("Cargando modelo...", flush=True)
 model = Model(MODEL)
+print("Token:", TOKEN, flush=True)
 print("Listo. Servidor en 127.0.0.1:%d (Ctrl+C para salir)" % PORT, flush=True)
 ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()

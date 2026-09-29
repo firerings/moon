@@ -4,3 +4,4 @@ logs/
 build/
 .gradle/
 local.properties
+.token

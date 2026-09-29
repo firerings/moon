@@ -9,7 +9,7 @@ while true; do
   echo "$MSGS" | jq -c --argjson u "$ULT" '.[] | select(._id > $u)' | while read -r m; do
     num=$(echo "$m" | jq -r .number)
     body=$(echo "$m" | jq -r .body | tr 'A-Z' 'a-z')
-    if [ "$num" = "$NUMERO" ] && [[ "$body" == *"$PALABRA"* ]]; then
+    if [ "${num: -9}" = "${NUMERO: -9}" ] && [[ "$body" == *"$(echo "$PALABRA" | tr A-Z a-z)"* ]]; then
       log "orden recibida de $num"
       "$DIR/reiniciar.sh" &
     fi

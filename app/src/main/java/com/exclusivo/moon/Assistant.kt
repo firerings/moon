@@ -1,0 +1,114 @@
+package com.exclusivo.moon
+
+import android.content.Context
+import android.content.Intent
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.service.voice.VoiceInteractionService
+import android.service.voice.VoiceInteractionSession
+import android.service.voice.VoiceInteractionSessionService
+import android.speech.RecognitionService
+import android.speech.SpeechRecognizer
+import android.view.LayoutInflater
+import android.view.View
+import android.widget.TextView
+import org.json.JSONObject
+
+class MoonInteractionService : VoiceInteractionService()
+
+class MoonSessionService : VoiceInteractionSessionService() {
+    override fun onNewSession(args: Bundle?): VoiceInteractionSession = MoonSession(this)
+}
+
+/** Obligatorio para que Android liste a Moon como asistente; no reconoce nada. */
+class MoonRecognitionService : RecognitionService() {
+    override fun onStartListening(i: Intent?, c: Callback?) { c?.error(SpeechRecognizer.ERROR_CLIENT) }
+    override fun onCancel(c: Callback?) {}
+    override fun onStopListening(c: Callback?) {}
+}
+
+class MoonSession(ctx: Context) : VoiceInteractionSession(ctx) {
+    private val ui = Handler(Looper.getMainLooper())
+    private var seq = 0
+    private var ultimo = ""
+    private var ocupado = false
+    private lateinit var v: View
+    private lateinit var titulo: TextView
+    private lateinit var texto: TextView
+    private lateinit var pEscucha: View
+    private lateinit var pOrden: View
+    private lateinit var pasos: List<TextView>
+
+    override fun onCreateContentView(): View {
+        v = LayoutInflater.from(context).inflate(R.layout.overlay, null)
+        titulo = v.findViewById(R.id.ovTitulo)
+        texto = v.findViewById(R.id.ovTexto)
+        pEscucha = v.findViewById(R.id.ovEscucha)
+        pOrden = v.findViewById(R.id.ovOrden)
+        pasos = listOf(R.id.paso1, R.id.paso2, R.id.paso3).map { v.findViewById<TextView>(it) }
+        v.findViewById<View>(R.id.scrim).setOnClickListener { hide() }
+        v.findViewById<View>(R.id.ovStop).setOnClickListener { hide() }
+        return v
+    }
+
+    override fun onShow(args: Bundle?, showFlags: Int) {
+        super.onShow(args, showFlags)
+        seq = 0; ultimo = ""
+        titulo.text = "Escuchando"; texto.text = ""
+        pEscucha.visibility = View.VISIBLE; pOrden.visibility = View.GONE
+        Thread { Api.call(context, "/escuchar", "POST") }.start()
+        ui.post(poll)
+    }
+
+    override fun onHide() {
+        ui.removeCallbacks(poll)
+        Thread { Api.call(context, "/parar", "POST") }.start()
+        super.onHide()
+    }
+
+    private val poll = object : Runnable {
+        override fun run() {
+            if (!ocupado) {
+                ocupado = true
+                Thread {
+                    val r = Api.call(context, "/estado?desde=$seq")
+                    ocupado = false
+                    ui.post { pintar(r) }
+                }.start()
+            }
+            ui.postDelayed(this, 350)
+        }
+    }
+
+    private fun pintar(r: String?) {
+        if (r == null) { error("Sin conexión con Termux", "Inicia voz_servidor.py en Termux"); return }
+        val j = try { JSONObject(r) } catch (e: Exception) { return }
+        if (j.has("auth")) { error("Token incorrecto", "Revísalo en Moon, pestaña Sistema"); return }
+        if (j.getInt("total") < seq) seq = 0
+        val fin = j.getJSONArray("finales")
+        for (i in 0 until fin.length()) { val f = fin.getJSONObject(i); seq = maxOf(seq, f.getInt("n")); ultimo = f.getString("t") }
+        val o = j.optJSONObject("orden")
+        if (o != null) {
+            titulo.text = o.getString("nombre")
+            pEscucha.visibility = View.GONE; pOrden.visibility = View.VISIBLE
+            val paso = o.getInt("paso"); val hecho = o.getBoolean("hecho")
+            val nombres = listOf("Modo avión activado", "Modo avión desactivado", "Encendiendo el hotspot")
+            pasos.forEachIndexed { i, t ->
+                val n = i + 1
+                t.text = (if (n < paso || hecho) "✓  " else if (n == paso) "●  " else "○  ") + nombres[i]
+            }
+            texto.text = "Orden: «reiniciar»"
+        } else {
+            titulo.text = if (j.getBoolean("escuchando")) "Escuchando" else "En pausa"
+            pEscucha.visibility = View.VISIBLE; pOrden.visibility = View.GONE
+            val parcial = j.getString("parcial")
+            texto.text = if (parcial.isNotEmpty()) parcial else ultimo
+        }
+    }
+
+    private fun error(t: String, d: String) {
+        titulo.text = t; texto.text = d
+        pEscucha.visibility = View.GONE; pOrden.visibility = View.GONE
+    }
+}

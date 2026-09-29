@@ -3,7 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val run = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
+val runNumber = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
 
 android {
     namespace = "com.exclusivo.moon"
@@ -12,8 +12,19 @@ android {
         applicationId = "com.exclusivo.moon"
         minSdk = 26
         targetSdk = 34
-        versionCode = run
-        versionName = "0.1.$run"
+        versionCode = runNumber
+        versionName = "0.1.$runNumber"
+    }
+    val ks = System.getenv("KEYSTORE_PATH")
+    if (ks != null) {
+        signingConfigs.create("moon") {
+            storeFile = file(ks)
+            storePassword = System.getenv("KEYSTORE_PASSWORD")
+            keyAlias = "moon"
+            storeType = "pkcs12"
+            keyPassword = System.getenv("KEYSTORE_PASSWORD")
+        }
+        buildTypes.getByName("debug").signingConfig = signingConfigs.getByName("moon")
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
