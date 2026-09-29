@@ -12,6 +12,8 @@ if not os.path.exists(TF):
     open(TF, "w").write(secrets.token_hex(8))
     os.chmod(TF, 0o600)
 TOKEN = open(TF).read().strip()
+ACT = os.path.join(DIR, "logs", "actividad.jsonl")
+os.makedirs(os.path.dirname(ACT), exist_ok=True)
 
 
 def pausa(n, d):
@@ -32,6 +34,67 @@ def orden_vista():
     paso = 1 if el < a + 1 else (2 if el < a + 1 + r else 3)
     return {"nombre": "Reiniciar conexión", "paso": paso, "hecho": el > a + r + 6}
 
+
+def guardar(reg):
+    """Añade un registro al historial de actividad (una línea JSON)."""
+    reg["t"] = round(time.time(), 1)
+    try:
+        if os.path.exists(ACT) and os.path.getsize(ACT) > 100000:
+            with open(ACT) as f:
+                cola = f.readlines()[-200:]
+            with open(ACT, "w") as f:
+                f.writelines(cola)
+        with open(ACT, "a") as f:
+            f.write(json.dumps(reg, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def leer_actividad(limite=40):
+    try:
+        with open(ACT) as f:
+            lineas = f.readlines()[-limite:]
+    except OSError:
+        return []
+    out = []
+    for ln in lineas:
+        try:
+            out.append(json.loads(ln))
+        except ValueError:
+            pass
+    return out
+
+
+def marca_actividad():
+    """Cambia cuando el historial cambia (también si lo escribe un script bash)."""
+    try:
+        return os.stat(ACT).st_mtime_ns
+    except OSError:
+        return 0
+
+
+_shz = {"t": 0, "ok": False}
+
+
+def shizuku_activo():
+    if time.time() - _shz["t"] < 10:
+        return _shz["ok"]
+    try:
+        r = subprocess.run(["./rish", "-c", "id"], cwd=os.path.expanduser("~"),
+                           capture_output=True, text=True, timeout=5,
+                           env={**os.environ, "RISH_APPLICATION_ID": "com.termux"})
+        _shz["ok"] = r.returncode == 0 and "uid=" in r.stdout
+    except Exception:
+        _shz["ok"] = False
+    _shz["t"] = time.time()
+    return _shz["ok"]
+
+
+def modelo_corto():
+    m = re.search(r"-([a-z]+)-([\d.]+)$", os.path.basename(MODEL))
+    return "%s %s" % (m.group(1), m.group(2)) if m else os.path.basename(MODEL)
+
+
 E = {"escuchando": False, "parcial": "", "finales": [], "n": 0, "orden": None}
 lock = threading.Lock()
 parar = threading.Event()
@@ -50,9 +113,11 @@ def agregar(texto):
         E["n"] += 1
         E["finales"].append({"n": E["n"], "t": texto})
         E["finales"] = E["finales"][-50:]
+        guardar({"tipo": "texto", "texto": texto})
         o = E["orden"]
         if "reinici" in texto.lower() and (not o or time.time() - o["t0"] > 60):
             E["orden"] = {"t0": time.time()}
+            guardar({"tipo": "orden", "nombre": "Reiniciar conexión", "via": "voz"})
             subprocess.Popen([DIR + "/reiniciar.sh"])
 
 
@@ -105,9 +170,13 @@ class H(BaseHTTPRequestHandler):
             d = int(parse_qs(u.query).get("desde", ["0"])[0])
             with lock:
                 self._j({"escuchando": E["escuchando"], "parcial": E["parcial"],
-                         "total": E["n"],
+                         "total": E["n"], "act": marca_actividad(),
                          "finales": [f for f in E["finales"] if f["n"] > d],
                          "orden": orden_vista()})
+        elif u.path == "/actividad":
+            self._j({"items": leer_actividad()})
+        elif u.path == "/sistema":
+            self._j({"shizuku": shizuku_activo(), "modelo": modelo_corto()})
         else:
             self._j({"error": "no existe"}, 404)
 
@@ -125,6 +194,12 @@ class H(BaseHTTPRequestHandler):
             self._j({"ok": True})
         elif self.path == "/parar":
             parar.set()
+            self._j({"ok": True})
+        elif self.path == "/limpiar":
+            try:
+                open(ACT, "w").close()
+            except OSError:
+                pass
             self._j({"ok": True})
         else:
             self._j({"error": "no existe"}, 404)

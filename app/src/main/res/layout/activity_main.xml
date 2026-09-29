@@ -11,10 +11,18 @@
 
     <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
         <LinearLayout android:id="@+id/vInicio" android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center_horizontal" android:orientation="vertical" android:padding="20dp">
-            <com.exclusivo.moon.MoonView android:layout_width="150dp" android:layout_height="150dp" android:layout_marginTop="24dp" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:text="¿En qué te ayudo?" android:textColor="@color/moon_text" android:textSize="22sp" android:textStyle="bold" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="Di «reiniciar» o desliza desde la esquina" android:textColor="@color/moon_muted" android:textSize="14sp" />
-            <FrameLayout android:layout_width="match_parent" android:layout_height="130dp" android:layout_marginTop="18dp">
+            <com.exclusivo.moon.MoonView android:layout_width="96dp" android:layout_height="96dp" android:layout_marginTop="4dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="¿En qué te ayudo?" android:textColor="@color/moon_text" android:textSize="22sp" android:textStyle="bold" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Di «reiniciar» o desliza a la derecha desde la esquina" android:textColor="@color/moon_muted" android:textSize="14sp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:background="@drawable/sheet_bg" android:orientation="vertical" android:padding="16dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                    <TextView android:id="@+id/tvTituloIn" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="En pausa" android:textColor="@color/moon_text" android:textSize="16sp" android:textStyle="bold" />
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/chip_bg" android:paddingHorizontal="10dp" android:paddingVertical="4dp" android:text="Offline" android:textColor="@color/moon_ok" android:textSize="12sp" />
+                </LinearLayout>
+                <TextView android:id="@+id/tvTextoIn" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:minLines="2" android:textColor="@color/moon_text" android:textSize="20sp" />
+                <com.exclusivo.moon.WaveView android:id="@+id/waveIn" android:layout_width="match_parent" android:layout_height="44dp" android:layout_marginTop="6dp" android:visibility="invisible" />
+            </LinearLayout>
+            <FrameLayout android:layout_width="match_parent" android:layout_height="110dp" android:layout_marginTop="10dp">
                 <View android:id="@+id/pulso" android:layout_width="84dp" android:layout_height="84dp" android:layout_gravity="center" android:alpha="0" android:background="@drawable/pulse_bg" />
                 <com.google.android.material.floatingactionbutton.FloatingActionButton android:id="@+id/fab" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center" android:src="@drawable/ic_mic" app:backgroundTint="@color/moon_accent" app:fabCustomSize="76dp" app:maxImageSize="32dp" />
             </FrameLayout>
