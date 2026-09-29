@@ -74,6 +74,7 @@ class OverlayPanel(private val ctx: Context) {
                 Thread {
                     val r = Api.call(ctx, "/estado?desde=$seq")
                     val abrio = Acciones.procesar(ctx.applicationContext, r)
+                    if (abrio) Acciones.vigilar(ctx.applicationContext, 4)
                     ocupado = false
                     ui.post { pintar(r); if (abrio) onClose?.invoke() }
                 }.start()

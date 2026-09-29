@@ -135,8 +135,17 @@ def marcar_ack(i):
 
 def acciones_pendientes():
     ahora = time.time()
-    return [{k: a[k] for k in ("id", "tipo", "pkg", "nombre") if k in a}
-            for a in ACC["items"] if not a["ack"] and ahora - a["t"] < 20]
+    out = []
+    for a in ACC["items"]:
+        if not a["ack"] and ahora - a["t"] < 20:
+            a["servida"] = True
+            out.append({k: a[k] for k in ("id", "tipo", "pkg", "nombre", "texto") if k in a})
+    return out
+
+
+def accion_servida(i):
+    with lock:
+        return any(a["id"] == i and a.get("servida") for a in ACC["items"])
 
 
 def agregar(texto):
@@ -313,10 +322,12 @@ try:
     NLU_MODELO = NLU(os.path.join(DIR, "modelo_nlu.npz"))
 except Exception as e:
     print("Sin NLU (solo comandos.json):", e, flush=True)
+    acciones.log_evento({"tipo": "error", "donde": "nlu", "detalle": repr(e)})
     NLU_MODELO = None
 CEREBRO = acciones.Cerebro(NLU_MODELO, {
     "ui": guardar, "reiniciar": reiniciar_conexion, "iniciar": iniciar_escucha,
     "enviar": enviar_accion, "app_activa": app_activa,
+    "servida": accion_servida, "cancelar": marcar_ack,
     "parar": parar.set, "escuchando": esta_escuchando})
 CEREBRO.iniciar()
 threading.Thread(target=trabajador, daemon=True).start()

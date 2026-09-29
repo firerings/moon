@@ -26,6 +26,7 @@ UMBRAL_INTENT = 0.55        # confianza minima del NLU
 ESPERA_RESPUESTA = 15       # segundos que Moon espera un si/no
 SILENCIO_AUTO = 20          # cierre por silencio: escucha abierta por Moon o modo ahorro
 COLA_TTS = 0.9              # segundos de "oido apagado" tras hablar (evita oirse a si mismo)
+ESPERA_ENTREGA = 1.5        # segundos para que la app Moon recoja una frase a decir
 ESPERA_ACK = 4              # segundos que se espera a que la app Moon confirme
 BATERIA_BAJA = 20           # % a partir del cual pregunta por el modo ahorro
 BATERIA_OK = 35             # % a partir del cual vuelve a poder preguntar
@@ -113,6 +114,10 @@ GENERICOS = {"com", "org", "net", "android", "google", "apps", "app", "apk", "mo
              "io", "me", "co", "de", "es", "mi", "miui", "xiaomi", "samsung", "system",
              "service", "services", "provider", "providers", "client"}
 
+VERBOS_ABRIR = {"abre", "abrir", "abri", "abra", "abrime", "abrelo", "abrela", "lanza", "lanzar",
+                "inicia", "iniciar", "ejecuta", "ejecutar", "ahora"}   # "ahora": Vosk oye asi "abre"
+VERBOS_CERRAR = {"cierra", "cerrar", "cerra", "cierre", "termina", "terminar"}
+
 NOMBRES = {
     "abrir_app": "Abrir app", "cerrar_app": "Cerrar app", "hora": "Decir la hora",
     "bateria": "Estado de la batería", "linterna_on": "Encender linterna",
@@ -151,6 +156,7 @@ class Cerebro:
         self._mudo_hasta = 0.0
         self.pendiente = None
         self._abiertas = {}
+        self._habla = {}
         self.bateria_preguntada = False
         self.ahorro = self._cargar_estado().get("ahorro", False)
         self.comandos = self._cargar_comandos()
@@ -198,19 +204,42 @@ class Cerebro:
 
     # ---------- voz ----------
     def hablar(self, texto):
+        """Voz de la app Moon (motor de Android ya arrancado, casi instantanea) si esta conectada;
+        si no, termux-tts-speak (tarda varios segundos en arrancar)."""
         if not texto:
             return
         with self._tts_lock:
             self._mudo = True
+            via, error = "app", None
             try:
-                self.tts(texto)
-                error = None
+                if not self._decir_app(texto):
+                    via = "termux"
+                    self.tts(texto)
             except Exception as e:
                 error = str(e)
             finally:
                 self._mudo_hasta = time.time() + COLA_TTS
                 self._mudo = False
-        log_evento({"tipo": "habla", "texto": texto, **({"error": error} if error else {})})
+        log_evento({"tipo": "habla", "texto": texto, "via": via, **({"error": error} if error else {})})
+
+    def _decir_app(self, texto):
+        env = self.env
+        if not (env.get("app_activa") and env["app_activa"]() and env.get("enviar")):
+            return False
+        i = env["enviar"]({"tipo": "decir", "texto": texto})
+        h = {"ev": threading.Event(), "ok": None}
+        self._habla[i] = h
+        try:
+            fin = time.time() + ESPERA_ENTREGA
+            while not env["servida"](i):
+                if time.time() > fin:            # la app no la recogio: que hable Termux
+                    env["cancelar"](i)
+                    return False
+                time.sleep(0.05)
+            h["ev"].wait(min(15.0, 2.0 + 0.09 * len(texto)))   # hasta que termine de hablar
+            return h["ok"] is not False
+        finally:
+            self._habla.pop(i, None)
 
     def callando(self):
         """El bucle de audio descarta lo que oye mientras Moon habla."""
@@ -234,6 +263,12 @@ class Cerebro:
             if cmd:
                 reg.update(via="comando", accion=cmd["accion"])
                 return self._ejecutar(cmd["accion"], {}, cmd["confirmar"], reg, t0)
+            regla = self._regla_app(tn)
+            if regla:
+                accion, app, verbo = regla
+                if verbo != "ahora" or self.resolver_app(app, self.apps_instaladas()):
+                    reg.update(via="regla", entidades={"app": app})
+                    return self._ejecutar(accion, {"app": app}, False, reg, t0)
             if not self.nlu:
                 reg.update(via="ninguna", motivo="sin_nlu")
                 return log_evento(reg)
@@ -259,6 +294,18 @@ class Cerebro:
             reg.update(ok=False, motivo="no_implementado")
             log_evento(reg)
             return self.hablar("Todavía no sé hacer eso")
+
+    @staticmethod
+    def _regla_app(tn):
+        """'abre X' / 'cierra X' sin necesitar el modelo. Devuelve (accion, app, verbo) o None."""
+        toks = tn.split()
+        for i, t in enumerate(toks[:3]):
+            for accion, verbos in (("abrir_app", VERBOS_ABRIR), ("cerrar_app", VERBOS_CERRAR)):
+                if t in verbos:
+                    resto = [w for w in toks[i + 1:] if w not in RELLENO][:4]
+                    if resto and len(toks) - i - 1 <= 6:
+                        return accion, " ".join(resto), t
+        return None
 
     def _buscar_comando(self, tn):
         toks = tn.split()
@@ -526,7 +573,12 @@ class Cerebro:
         return ("Abriendo %s" % r["nombre"]) if self._lanzar_shizuku(r) else "No pude abrir %s" % r["nombre"]
 
     def resultado_app(self, i, ok):
-        """La app Moon confirma (ok) o dice que no pudo abrirla."""
+        """La app Moon confirma (ok) o dice que no pudo (abrir una app / terminar de hablar)."""
+        h = self._habla.get(i)
+        if h is not None:
+            h["ok"] = bool(ok)
+            h["ev"].set()
+            return
         r = self._abiertas.pop(i, None)
         log_evento({"tipo": "ack_app", "id": i, "ok": bool(ok), "app": r and r["nombre"]})
         if r and not ok:

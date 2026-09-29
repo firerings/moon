@@ -64,7 +64,7 @@ Franja fina en el borde inferior izquierdo: tocar y deslizar a la derecha abre e
 ## Cerebro de voz (acciones, respuestas habladas y logs)
 
 - `acciones.py`: interpreta cada frase de Vosk. Primero `comandos.json` (frases fijas, editable), luego el NLU
-  (`nlu_np.py` + `modelo_nlu.npz`, solo numpy) como respaldo. Ejecuta, responde por voz (`termux-tts-speak`) y pregunta sí/no.
+  (`nlu_np.py` + `modelo_nlu.npz`, Python puro: sin numpy ni PyTorch) como respaldo. «abre X» / «cierra X» se entienden con reglas, aunque el modelo falle. Ejecuta, responde por voz (`termux-tts-speak`) y pregunta sí/no.
 - Abrir apps: la app Moon envía su lista real de apps (`apps_app.json`) y abre la app pedida; si no está conectada o no
   confirma, usa Shizuku (`monkey`) como respaldo. Nombres propios extra en `apps_alias.json` (`{"nombre": ["paquete"]}`).
 - Modo ahorro: con batería ≤ 20 % Moon pregunta por voz si lo activa; en modo ahorro la escucha se cierra a los 20 s de silencio.

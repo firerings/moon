@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Modulo NLU (version numpy, sin PyTorch): INTENT CLASSIFICATION + SLOT FILLING.
+Modulo NLU (Python puro, sin numpy ni PyTorch): INTENT CLASSIFICATION + SLOT FILLING.
 
 Uso:
     from nlu import NLU
@@ -13,9 +13,13 @@ Uso:
     #   'slots': ['O', 'O', 'B-CONTACTO', 'I-CONTACTO', 'O', 'B-MENSAJE', 'I-MENSAJE']
     # }
 """
+import array
+import ast
 import json
-
-import numpy as np
+import math
+import struct
+import zipfile
+from operator import mul
 
 PAD_TOKEN = "<pad>"
 UNK_TOKEN = "<unk>"
@@ -88,54 +92,97 @@ def _extraer_entidades_slots(tokens, tags):
     return entidades
 
 
-def _sigmoid(x):
-    return 1.0 / (1.0 + np.exp(-np.clip(x, -30.0, 30.0)))
+def _sig(x):
+    return 1.0 / (1.0 + math.exp(-x)) if x > -30.0 else 0.0
+
+
+def _leer_npy(datos):
+    """Lee un .npy (float32 o texto) sin numpy. Devuelve (forma, valores | texto)."""
+    if datos[:6] != b"\x93NUMPY":
+        raise ValueError("no es un .npy")
+    if datos[6] == 1:
+        n, ini = struct.unpack("<H", datos[8:10])[0], 10
+    else:
+        n, ini = struct.unpack("<I", datos[8:12])[0], 12
+    cab = ast.literal_eval(datos[ini:ini + n].decode("latin1"))
+    cuerpo = datos[ini + n:]
+    if cab["descr"].startswith("<U"):
+        return cab["shape"], cuerpo[:4 * int(cab["descr"][2:])].decode("utf-32-le")
+    if cab["descr"] != "<f4" or cab["fortran_order"]:
+        raise ValueError("formato no soportado: %s" % cab["descr"])
+    v = array.array("f")
+    v.frombytes(cuerpo)
+    return cab["shape"], v
+
+
+def _cargar_pesos(ruta):
+    pesos, meta = {}, None
+    with zipfile.ZipFile(ruta) as z:
+        for nombre in z.namelist():
+            forma, v = _leer_npy(z.read(nombre))
+            clave = nombre[:-4]
+            if clave == "meta":
+                meta = json.loads(v)
+            elif len(forma) == 2:
+                c = forma[1]
+                pesos[clave] = [v[i * c:(i + 1) * c].tolist() for i in range(forma[0])]
+            else:
+                pesos[clave] = v.tolist()
+    return meta, pesos
+
+
+def _matvec(filas, v):
+    return [sum(map(mul, f, v)) for f in filas]
 
 
 def _lstm_dir(x, w_ih, w_hh, b, reverso=False):
     """Una direccion de una LSTM de PyTorch (orden de puertas: i, f, g, o)."""
-    n, h = x.shape[0], w_hh.shape[1]
-    hs = np.zeros((n, h), dtype=np.float32)
-    ht = np.zeros(h, dtype=np.float32)
-    ct = np.zeros(h, dtype=np.float32)
-    pasos = range(n - 1, -1, -1) if reverso else range(n)
-    with np.errstate(over="ignore"):
-        for t in pasos:
-            g = w_ih @ x[t] + w_hh @ ht + b
-            i, f, c_, o = g[:h], g[h:2 * h], g[2 * h:3 * h], g[3 * h:]
-            ct = _sigmoid(f) * ct + _sigmoid(i) * np.tanh(c_)
-            ht = _sigmoid(o) * np.tanh(ct)
-            hs[t] = ht
+    n, h = len(x), len(w_hh[0])
+    hs = [None] * n
+    ht = [0.0] * h
+    ct = [0.0] * h
+    for t in (range(n - 1, -1, -1) if reverso else range(n)):
+        a, c = _matvec(w_ih, x[t]), _matvec(w_hh, ht)
+        g = [a[k] + c[k] + b[k] for k in range(4 * h)]
+        ct = [_sig(g[h + k]) * ct[k] + _sig(g[k]) * math.tanh(g[2 * h + k]) for k in range(h)]
+        ht = [_sig(g[3 * h + k]) * math.tanh(ct[k]) for k in range(h)]
+        hs[t] = ht
     return hs, ht
 
 
 def _softmax(v):
-    e = np.exp(v - v.max())
-    return e / e.sum()
+    m = max(v)
+    e = [math.exp(x - m) for x in v]
+    s = sum(e)
+    return [x / s for x in e]
+
+
+def _argmax(v):
+    return max(range(len(v)), key=v.__getitem__)
 
 
 class NLU:
+    """Red BiLSTM (intencion + entidades) en Python puro: no necesita numpy ni PyTorch."""
+
     def __init__(self, ruta_modelo="modelo_nlu.npz"):
-        z = np.load(ruta_modelo, allow_pickle=False)
-        meta = json.loads(str(z["meta"]))
+        meta, self.w = _cargar_pesos(ruta_modelo)
         self.word2idx = meta["word2idx"]
         self.intent2idx = meta["intent2idx"]
         self.slot2idx = meta["slot2idx"]
         self.idx2intent = {v: k for k, v in self.intent2idx.items()}
         self.idx2slot = {v: k for k, v in self.slot2idx.items()}
-        self.w = {k: z[k] for k in z.files if k != "meta"}
 
     def _forward(self, ids):
         w = self.w
-        x = w["embedding.weight"][ids]
-        bf = w["lstm.bias_ih_l0"] + w["lstm.bias_hh_l0"]
-        br = w["lstm.bias_ih_l0_reverse"] + w["lstm.bias_hh_l0_reverse"]
+        x = [w["embedding.weight"][i] for i in ids]
+        bf = [p + q for p, q in zip(w["lstm.bias_ih_l0"], w["lstm.bias_hh_l0"])]
+        br = [p + q for p, q in zip(w["lstm.bias_ih_l0_reverse"], w["lstm.bias_hh_l0_reverse"])]
         hf, h_fwd = _lstm_dir(x, w["lstm.weight_ih_l0"], w["lstm.weight_hh_l0"], bf)
         hb, h_bwd = _lstm_dir(x, w["lstm.weight_ih_l0_reverse"], w["lstm.weight_hh_l0_reverse"], br, True)
-        oracion = np.concatenate([h_fwd, h_bwd])
-        intent_logits = w["intent_head.weight"] @ oracion + w["intent_head.bias"]
-        por_token = np.concatenate([hf, hb], axis=1)
-        slot_logits = por_token @ w["slot_head.weight"].T + w["slot_head.bias"]
+        oracion = h_fwd + h_bwd
+        intent_logits = [s + b for s, b in zip(_matvec(w["intent_head.weight"], oracion), w["intent_head.bias"])]
+        slot_logits = [[s + b for s, b in zip(_matvec(w["slot_head.weight"], hf[t] + hb[t]), w["slot_head.bias"])]
+                       for t in range(len(ids))]
         return intent_logits, slot_logits
 
     def procesar(self, texto):
@@ -144,11 +191,11 @@ class NLU:
             return {"intent": "conversar", "confianza": 0.0, "tokens": [], "slots": []}
 
         ids = [self.word2idx.get(t, self.word2idx.get(_sin_acentos(t), self.word2idx[UNK_TOKEN])) for t in tokens]
-        intent_logits, slot_logits = self._forward(np.array(ids))
+        intent_logits, slot_logits = self._forward(ids)
         intent_probs = _softmax(intent_logits)
-        intent_idx = int(np.argmax(intent_probs))
+        intent_idx = _argmax(intent_probs)
         intent_conf = float(intent_probs[intent_idx])
-        slot_tags = [self.idx2slot[int(i)] for i in np.argmax(slot_logits, axis=1)]
+        slot_tags = [self.idx2slot[_argmax(f)] for f in slot_logits]
         slot_tags = _normalizar_tags_bio(slot_tags)
 
         result = {

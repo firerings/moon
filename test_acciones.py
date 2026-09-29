@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Prueba del cerebro de Moon con Shizuku, TTS y microfono simulados.
 Corre en Termux o en un PC:  python3 test_acciones.py   (no toca tu movil ni tus logs)"""
-import json, os, shutil, sys, tempfile, time
+import json, os, shutil, sys, tempfile, threading, time
 
 tmp = tempfile.mkdtemp()
 os.environ["MOON_LOGDIR"] = os.path.join(tmp, "MoonLogs")
@@ -43,16 +43,34 @@ def iniciar(auto=False): S["esc"] = True
 def parar(): S["esc"] = False
 
 
-ACC = {"n": 0, "enviadas": [], "activa": False}
+ACC = {"n": 0, "enviadas": [], "activa": False, "ult_abrir": 0, "modo_voz": "ok", "entregadas": set()}
 
 
 def enviar(a):
+    """Simula la app Moon: recoge lo que se le manda y confirma."""
     ACC["n"] += 1
-    ACC["enviadas"].append(a)
-    return ACC["n"]
+    i = ACC["n"]
+    if a["tipo"] == "decir":
+        if ACC["modo_voz"] in ("ok", "falla"):
+            ACC["entregadas"].add(i)
+            if ACC["modo_voz"] == "ok":
+                S["dicho"].append(a["texto"]); S["nativo"] += 1
+            threading.Timer(0.02, lambda: c.resultado_app(i, ACC["modo_voz"] == "ok")).start()
+        # modo "no_recoge": la app no la recibe nunca
+    else:
+        ACC["enviadas"].append(a)
+        ACC["ult_abrir"] = i
+    return i
 
 
-env = {"enviar": enviar, "app_activa": lambda: ACC["activa"], "rish": rish, "tts": lambda t: S["dicho"].append(t), "ui": lambda d: S["ui"].append(d),
+def tts(t):
+    S["dicho"].append(t); S["tts"] += 1
+
+
+S.update(nativo=0, tts=0)
+env = {"enviar": enviar, "app_activa": lambda: ACC["activa"], "servida": lambda i: i in ACC["entregadas"],
+       "cancelar": lambda i: None, "rish": rish, "tts": tts,
+       "ui": lambda d: S["ui"].append(d),
        "reiniciar": reiniciar, "iniciar": iniciar, "parar": parar,
        "escuchando": lambda: S["esc"], "bateria": lambda: S["bat"]}
 c = acciones.Cerebro(nlu, env)
@@ -115,10 +133,10 @@ if nlu:
     chequear("app conectada: manda la orden a la app y NO usa Shizuku",
              d == "Abriendo WhatsApp" and ACC["enviadas"][-1] == {"tipo": "abrir", "pkg": "com.whatsapp", "nombre": "WhatsApp"}
              and not any(x.startswith("monkey") for x in S["rish"]))
-    c.resultado_app(ACC["n"], True)
+    c.resultado_app(ACC["ult_abrir"], True)
     time.sleep(0.6)
     chequear("con confirmación de la app no hay respaldo", not any(x.startswith("monkey") for x in S["rish"]))
-    dice("abre chrome"); c.resultado_app(ACC["n"], False)
+    dice("abre chrome"); c.resultado_app(ACC["ult_abrir"], False)
     chequear("la app dice que no pudo -> respaldo con Shizuku", any("monkey -p com.android.chrome" in x for x in S["rish"]))
     dice("abre ajustes"); time.sleep(0.8)
     chequear("la app no responde -> respaldo con Shizuku", any("monkey -p com.android.settings" in x for x in S["rish"]))
@@ -126,6 +144,36 @@ if nlu:
     dice("abre calculadora")
     chequear("app Moon no conectada -> Shizuku directo", any("monkey -p com.miui.calculator" in x for x in S["rish"]))
 os.remove(os.path.join(tmp, "apps_app.json"))
+
+# --- reglas 'abre X' sin modelo (NLU apagado) ---
+c2 = acciones.Cerebro(None, env)
+ACC["activa"] = True
+json.dump({"apps": [{"n": n, "p": p} for n, p in CAT]}, open(os.path.join(tmp, "apps_app.json"), "w", encoding="utf-8"))
+def dice2(t):
+    S["dicho"].clear(); c2.procesar(t); return S["dicho"][-1] if S["dicho"] else None
+chequear("sin modelo: 'abre whatsapp' funciona", dice2("abre whatsapp") == "Abriendo WhatsApp")
+chequear("sin modelo: 'abrir whatsapp'", dice2("abrir whatsapp") == "Abriendo WhatsApp")
+chequear("sin modelo: 'por favor abre chrome'", dice2("por favor abre chrome") == "Abriendo Chrome")
+chequear("Vosk oye 'ahora whatsapp' -> abre", dice2("ahora whatsapp") == "Abriendo WhatsApp")
+chequear("'ahora hablamos' no hace nada", dice2("ahora hablamos") is None)
+chequear("app inexistente avisa", dice2("abre photoshop").startswith("No encontré"))
+chequear("sin modelo: cierra usa Shizuku", dice2("cierra chrome") == "Cerré Chrome")
+os.remove(os.path.join(tmp, "apps_app.json"))
+ACC["activa"] = False
+
+# --- voz: la app Moon (rápida) o Termux (lenta) ---
+ACC["activa"] = True; ACC["modo_voz"] = "ok"; S["nativo"] = S["tts"] = 0
+c.hablar("Prueba")
+chequear("voz: app conectada -> habla la app, no Termux", S["nativo"] == 1 and S["tts"] == 0)
+ACC["modo_voz"] = "falla"; S["nativo"] = S["tts"] = 0
+c.hablar("Prueba dos")
+chequear("voz: la app no tiene voz -> respaldo Termux", S["tts"] == 1)
+ACC["modo_voz"] = "no_recoge"; acciones.ESPERA_ENTREGA = 0.3; S["tts"] = 0
+t0 = time.time(); c.hablar("Prueba tres")
+chequear("voz: la app no recoge la frase -> Termux en menos de 1 s", S["tts"] == 1 and time.time() - t0 < 1)
+ACC["activa"] = False; ACC["modo_voz"] = "ok"; S["nativo"] = S["tts"] = 0
+c.hablar("Prueba cuatro")
+chequear("voz: app desconectada -> Termux directo", S["tts"] == 1 and S["nativo"] == 0)
 
 # --- si / no ---
 S["dicho"].clear(); S["bat"] = (15, False); c.revisar_bateria(S["bat"])
@@ -153,8 +201,10 @@ chequear("límite de silencio: normal sin límite, ahorro 20 s", c.limite_silenc
 dia = os.listdir(os.environ["MOON_LOGDIR"])
 lineas = [json.loads(l) for l in open(os.path.join(os.environ["MOON_LOGDIR"], dia[0]), encoding="utf-8")]
 chequear("log por día: un archivo moon_AAAA-MM-DD.jsonl", len(dia) == 1 and dia[0].startswith("moon_") and dia[0].endswith(".jsonl"))
-chequear("log guarda texto crudo, intención, confianza y resultado",
-         any(l.get("via") == "nlu" and "confianza" in l and "ms" in l for l in lineas) if nlu else True)
+chequear("log guarda texto crudo, vía, acción, resultado y duración",
+         any(l.get("via") == "regla" and l.get("ok") and "ms" in l and l.get("texto") for l in lineas))
+chequear("log del NLU guarda intención y confianza",
+         any(l.get("via") == "nlu" and "confianza" in l and "intent" in l for l in lineas) if nlu else True)
 print("\n%d líneas de log" % len(lineas), "| FALLOS:", fallos)
 shutil.rmtree(tmp, ignore_errors=True)
 sys.exit(1 if fallos else 0)

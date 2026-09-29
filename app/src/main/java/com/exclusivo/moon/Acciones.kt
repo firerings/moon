@@ -21,6 +21,7 @@ object Acciones {
         if (resp == null) return false
         val j = try { JSONObject(resp) } catch (e: Exception) { return false }
         if (j.has("auth")) return false
+        Voz.calentar(ctx)
         var abrio = false
         val arr = j.optJSONArray("acciones")
         synchronized(lock) {
@@ -41,8 +42,13 @@ object Acciones {
     }
 
     private fun ejecutar(ctx: Context, a: JSONObject): Boolean {
+        val tipo = a.optString("tipo")
+        if (tipo == "decir") {
+            Voz.decir(ctx, a.optString("texto"), a.getInt("id"))   // confirma al terminar de hablar
+            return false
+        }
         var ok = false
-        if (a.optString("tipo") == "abrir") {
+        if (tipo == "abrir") {
             try {
                 val i = ctx.packageManager.getLaunchIntentForPackage(a.getString("pkg"))
                 if (i != null) {
@@ -54,6 +60,17 @@ object Acciones {
         }
         Api.call(ctx, "/ack?id=" + a.getInt("id") + "&ok=" + (if (ok) 1 else 0), "POST")
         return ok
+    }
+
+    /** Sigue consultando unos segundos (sin pantalla) para que llegue lo que Moon dice tras abrir una app. */
+    fun vigilar(ctx: Context, segundos: Int) {
+        Thread {
+            val fin = System.currentTimeMillis() + segundos * 1000L
+            while (System.currentTimeMillis() < fin) {
+                procesar(ctx, Api.call(ctx, "/estado?desde=999999"))
+                try { Thread.sleep(300) } catch (e: InterruptedException) { return@Thread }
+            }
+        }.start()
     }
 
     /** Envía nombre y paquete de las apps con icono en el lanzador. Como mucho una vez por hora. */
