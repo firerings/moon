@@ -20,11 +20,11 @@ jobs:
           gradle-version: 8.9
       - name: Restaurar keystore
         run: echo "${{ secrets.KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/moon.jks"
-      - run: gradle assembleDebug --no-daemon
+      - run: gradle assembleRelease --no-daemon
         env:
           KEYSTORE_PATH: ${{ runner.temp }}/moon.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-      - run: cp app/build/outputs/apk/debug/app-debug.apk Moon-${{ github.run_number }}.apk
+      - run: cp app/build/outputs/apk/release/app-release.apk Moon-${{ github.run_number }}.apk
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v0.1.${{ github.run_number }}

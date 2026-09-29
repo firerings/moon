@@ -3,6 +3,7 @@ package com.exclusivo.moon
 import android.animation.ObjectAnimator
 import android.animation.PropertyValuesHolder
 import android.animation.ValueAnimator
+import android.app.Activity
 import android.app.role.RoleManager
 import android.content.Intent
 import android.graphics.Typeface
@@ -16,12 +17,10 @@ import android.view.Gravity
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 import android.widget.EditText
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
-import com.google.android.material.floatingactionbutton.FloatingActionButton
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -30,7 +29,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : Activity() {
 
     private val ui = Handler(Looper.getMainLooper())
     private val ocupado = AtomicBoolean(false)
@@ -40,7 +39,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var prefs: android.content.SharedPreferences
     private lateinit var tvEstado: TextView
-    private lateinit var fab: FloatingActionButton
+    private lateinit var fab: ImageButton
     private lateinit var pulso: View
     private lateinit var animPulso: ObjectAnimator
     private lateinit var vistas: List<View>
@@ -62,7 +61,7 @@ class MainActivity : AppCompatActivity() {
     private var tabActual = 0
     private var verApp = "?"
 
-    private fun c(id: Int) = ContextCompat.getColor(this, id)
+    private fun c(id: Int) = getColor(id)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun tv(t: String, sp: Float, col: Int, bold: Boolean = false) = TextView(this).apply {
@@ -187,7 +186,7 @@ class MainActivity : AppCompatActivity() {
         val on = !prefs.getBoolean("gesto", false)
         prefs.edit().putBoolean("gesto", on).apply()
         val i = Intent(this, EdgeService::class.java)
-        if (on) ContextCompat.startForegroundService(this, i) else stopService(i)
+        if (on) startForegroundService(i) else stopService(i)
         refrescar()
     }
 
@@ -202,7 +201,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (prefs.getBoolean("gesto", false) && Settings.canDrawOverlays(this))
-            ContextCompat.startForegroundService(this, Intent(this, EdgeService::class.java))
+            startForegroundService(Intent(this, EdgeService::class.java))
         refrescar()
         ui.post(poll)
     }
@@ -390,7 +389,7 @@ class MainActivity : AppCompatActivity() {
         if (!prefs.getBoolean("gesto", false) || !Settings.canDrawOverlays(this)) return
         val i = Intent(this, EdgeService::class.java)
         stopService(i)
-        ContextCompat.startForegroundService(this, i)
+        startForegroundService(i)
     }
 
     private fun actualizarBoton() {
