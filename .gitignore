@@ -5,3 +5,7 @@ build/
 .gradle/
 local.properties
 .token
+estado_moon.json
+apps_cache.json
+__pycache__/
+apps_app.json

@@ -1,0 +1,13 @@
+{
+  "comandos": [
+    {"frases": ["reinici*"], "accion": "reiniciar"},
+    {"frases": ["que hora es", "dime la hora", "la hora"], "accion": "hora"},
+    {"frases": ["bateria", "cuanta bateria queda", "como esta la bateria", "nivel de bateria"], "accion": "bateria"},
+    {"frases": ["enciende la linterna", "prende la linterna", "activa la linterna", "linterna"], "accion": "linterna_on"},
+    {"frases": ["apaga la linterna", "desactiva la linterna", "quita la linterna"], "accion": "linterna_off"},
+    {"frases": ["activa el modo ahorro", "modo ahorro", "ahorro de bateria"], "accion": "ahorro_on"},
+    {"frases": ["desactiva el modo ahorro", "quita el modo ahorro", "sal del modo ahorro", "apaga el modo ahorro"], "accion": "ahorro_off"},
+    {"frases": ["actualiza las apps", "actualiza las aplicaciones", "busca las apps"], "accion": "actualizar_apps"},
+    {"frases": ["deja de escuchar", "para de escuchar", "silencio", "detente"], "accion": "parar"}
+  ]
+}

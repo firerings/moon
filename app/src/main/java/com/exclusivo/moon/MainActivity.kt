@@ -94,6 +94,8 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         prefs = getSharedPreferences("moon", 0)
+        if (checkSelfPermission("com.termux.permission.RUN_COMMAND") != android.content.pm.PackageManager.PERMISSION_GRANTED)
+            requestPermissions(arrayOf("com.termux.permission.RUN_COMMAND"), 7)
         tvEstado = findViewById(R.id.tvEstado)
         fab = findViewById(R.id.fab)
         pulso = findViewById(R.id.pulso)
@@ -217,6 +219,7 @@ class MainActivity : Activity() {
             if (ocupado.compareAndSet(false, true)) {
                 Thread {
                     val r = Api.call(this@MainActivity, "/estado?desde=$seq")
+                    Acciones.procesar(applicationContext, r)
                     ocupado.set(false)
                     ui.post { pintar(r) }
                 }.start()
@@ -250,8 +253,9 @@ class MainActivity : Activity() {
     private fun pintar(resp: String?) {
         if (resp == null) {
             conectado = false; escuchando = false
+            Termux.iniciarServidor(applicationContext)
             estado("Sin conexión con Termux", false)
-            vistaInicio("Sin conexión con Termux", "Inicia voz_servidor.py en Termux", false)
+            vistaInicio("Sin conexión con Termux", "Intentando iniciar el servidor… si no arranca, ejecuta ./moon.sh en Termux", false)
             actualizarBoton(); return
         }
         try {

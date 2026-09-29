@@ -1,7 +1,8 @@
-import json, subprocess, threading, os, re, secrets, time
+import json, subprocess, threading, os, re, secrets, time, queue
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from vosk import Model, KaldiRecognizer, SetLogLevel
+import acciones
 
 SetLogLevel(-1)
 MODEL = "/storage/emulated/0/Download/ProyectosTermux/Models/vosk-model-small-es-0.42"
@@ -108,43 +109,121 @@ def preparar_audio():
         subprocess.run(["pactl", "load-module", "module-sles-source"])
 
 
+COLA = queue.Queue()
+ACC = {"sid": secrets.token_hex(3), "n": 0, "items": []}   # acciones que la app Moon ejecuta
+VISTO = {"t": 0.0}                                          # ultima vez que la app pregunto /estado
+
+
+def enviar_accion(a):
+    with lock:
+        ACC["n"] += 1
+        a = {**a, "id": ACC["n"], "t": time.time(), "ack": False}
+        ACC["items"] = ACC["items"][-19:] + [a]
+        return a["id"]
+
+
+def app_activa():
+    return time.time() - VISTO["t"] < 3
+
+
+def marcar_ack(i):
+    with lock:
+        for a in ACC["items"]:
+            if a["id"] == i:
+                a["ack"] = True
+
+
+def acciones_pendientes():
+    ahora = time.time()
+    return [{k: a[k] for k in ("id", "tipo", "pkg", "nombre") if k in a}
+            for a in ACC["items"] if not a["ack"] and ahora - a["t"] < 20]
+
+
 def agregar(texto):
     if texto:
         E["n"] += 1
         E["finales"].append({"n": E["n"], "t": texto})
         E["finales"] = E["finales"][-50:]
         guardar({"tipo": "texto", "texto": texto})
+        COLA.put(texto)
+
+
+def reiniciar_conexion():
+    with lock:
         o = E["orden"]
-        if "reinici" in texto.lower() and (not o or time.time() - o["t0"] > 60):
-            E["orden"] = {"t0": time.time()}
-            guardar({"tipo": "orden", "nombre": "Reiniciar conexión", "via": "voz"})
-            subprocess.Popen([DIR + "/reiniciar.sh"])
+        if o and time.time() - o["t0"] <= 60:
+            return "Ya estoy reiniciando la conexión"
+        E["orden"] = {"t0": time.time()}
+    guardar({"tipo": "orden", "nombre": "Reiniciar conexión", "via": "voz"})
+    subprocess.Popen([DIR + "/reiniciar.sh"])
+    return "Reiniciando la conexión"
 
 
-def escuchar():
+def trabajador():
+    """Procesa las frases fuera del hilo de audio (hablar puede tardar segundos)."""
+    while True:
+        t = COLA.get()
+        try:
+            CEREBRO.procesar(t)
+        except Exception as e:
+            acciones.log_evento({"tipo": "error", "donde": "procesar", "texto": t, "detalle": str(e)})
+
+
+def escuchar(auto=False):
     rec = KaldiRecognizer(model, 16000)
     p = subprocess.Popen(
         ["parec", "--device=OpenSL_ES_source", "--rate=16000", "--channels=1",
          "--format=s16le", "--latency-msec=100"], stdout=subprocess.PIPE)
+    ult = time.time()
+    mudo = False
     try:
         while not parar.is_set():
             data = p.stdout.read(3200)
             if not data:
+                break
+            if CEREBRO.callando():
+                mudo = True
+                ult = time.time()
+                continue
+            if mudo:
+                rec.Reset()
+                mudo = False
+            lim = CEREBRO.limite_silencio(auto)
+            if lim and time.time() - ult > lim:
                 break
             if rec.AcceptWaveform(data):
                 t = json.loads(rec.Result()).get("text", "")
                 with lock:
                     E["parcial"] = ""
                     agregar(t)
+                if t:
+                    ult = time.time()
             else:
+                par = json.loads(rec.PartialResult()).get("partial", "")
                 with lock:
-                    E["parcial"] = json.loads(rec.PartialResult()).get("partial", "")
+                    E["parcial"] = par
+                if par:
+                    ult = time.time()
     finally:
         p.terminate()
         with lock:
             agregar(json.loads(rec.FinalResult()).get("text", ""))
             E["escuchando"] = False
             E["parcial"] = ""
+
+
+def iniciar_escucha(auto=False):
+    with lock:
+        ya = E["escuchando"]
+        if not ya:
+            E["escuchando"] = True
+    if not ya:
+        parar.clear()
+        threading.Thread(target=escuchar, args=(auto,), daemon=True).start()
+
+
+def esta_escuchando():
+    return E["escuchando"]
 
 
 class H(BaseHTTPRequestHandler):
@@ -168,11 +247,13 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path == "/estado":
             d = int(parse_qs(u.query).get("desde", ["0"])[0])
+            VISTO["t"] = time.time()
             with lock:
                 self._j({"escuchando": E["escuchando"], "parcial": E["parcial"],
                          "total": E["n"], "act": marca_actividad(),
                          "finales": [f for f in E["finales"] if f["n"] > d],
-                         "orden": orden_vista()})
+                         "orden": orden_vista(), "ahorro": CEREBRO.ahorro,
+                         "sid": ACC["sid"], "acciones": acciones_pendientes()})
         elif u.path == "/actividad":
             self._j({"items": leer_actividad()})
         elif u.path == "/sistema":
@@ -183,14 +264,30 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._auth():
             return
+        u = urlparse(self.path)
         if self.path == "/escuchar":
-            with lock:
-                ya = E["escuchando"]
-                if not ya:
-                    E["escuchando"] = True
-            if not ya:
-                parar.clear()
-                threading.Thread(target=escuchar, daemon=True).start()
+            iniciar_escucha()
+            self._j({"ok": True})
+        elif u.path == "/apps":
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            if n <= 0 or n > 1000000:
+                return self._j({"error": "tamano"}, 413)
+            try:
+                lista = [{"n": str(x["n"]), "p": str(x["p"])} for x in json.loads(self.rfile.read(n))]
+                with open(os.path.join(DIR, "apps_app.json"), "w", encoding="utf-8") as f:
+                    json.dump({"t": time.time(), "apps": lista}, f, ensure_ascii=False)
+                acciones.log_evento({"tipo": "apps_sincronizadas", "n": len(lista)})
+                self._j({"ok": True, "n": len(lista)})
+            except (ValueError, KeyError, TypeError, OSError):
+                self._j({"error": "formato"}, 400)
+        elif u.path == "/ack":
+            q = parse_qs(u.query)
+            try:
+                i, ok = int(q["id"][0]), q.get("ok", ["0"])[0] == "1"
+            except (KeyError, ValueError):
+                return self._j({"error": "parametros"}, 400)
+            marcar_ack(i)
+            CEREBRO.resultado_app(i, ok)
             self._j({"ok": True})
         elif self.path == "/parar":
             parar.set()
@@ -211,6 +308,18 @@ class H(BaseHTTPRequestHandler):
 preparar_audio()
 print("Cargando modelo...", flush=True)
 model = Model(MODEL)
+try:
+    from nlu_np import NLU
+    NLU_MODELO = NLU(os.path.join(DIR, "modelo_nlu.npz"))
+except Exception as e:
+    print("Sin NLU (solo comandos.json):", e, flush=True)
+    NLU_MODELO = None
+CEREBRO = acciones.Cerebro(NLU_MODELO, {
+    "ui": guardar, "reiniciar": reiniciar_conexion, "iniciar": iniciar_escucha,
+    "enviar": enviar_accion, "app_activa": app_activa,
+    "parar": parar.set, "escuchando": esta_escuchando})
+CEREBRO.iniciar()
+threading.Thread(target=trabajador, daemon=True).start()
 print("Token:", TOKEN, flush=True)
 print("Listo. Servidor en 127.0.0.1:%d (Ctrl+C para salir)" % PORT, flush=True)
 ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()

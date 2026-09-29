@@ -60,3 +60,15 @@ Franja fina en el borde inferior izquierdo: tocar y deslizar a la derecha abre e
 - Duración de la orden en Actividad (ej. "18 s")
 - Skills del asistente: registro de comandos en `comandos.json` (frase -> acción), conectividad, apps, temporizadores, consultas locales, vigilante automático con aviso por SMS
 - Asistente por voz en el móvil de ella
+
+## Cerebro de voz (acciones, respuestas habladas y logs)
+
+- `acciones.py`: interpreta cada frase de Vosk. Primero `comandos.json` (frases fijas, editable), luego el NLU
+  (`nlu_np.py` + `modelo_nlu.npz`, solo numpy) como respaldo. Ejecuta, responde por voz (`termux-tts-speak`) y pregunta sí/no.
+- Abrir apps: la app Moon envía su lista real de apps (`apps_app.json`) y abre la app pedida; si no está conectada o no
+  confirma, usa Shizuku (`monkey`) como respaldo. Nombres propios extra en `apps_alias.json` (`{"nombre": ["paquete"]}`).
+- Modo ahorro: con batería ≤ 20 % Moon pregunta por voz si lo activa; en modo ahorro la escucha se cierra a los 20 s de silencio.
+- Logs: `Download/MoonLogs/moon_AAAA-MM-DD.jsonl`, una línea por evento (texto de Vosk, intención, confianza, acción, resultado).
+- `moon.sh` arranca el servidor (idempotente). La app Moon lo llama sola (RUN_COMMAND) cuando no encuentra el servidor;
+  requiere `allow-external-apps=true` en `~/.termux/termux.properties` y el permiso «Ejecutar comandos en Termux» para Moon.
+- `python3 test_acciones.py` prueba el cerebro con Shizuku, voz y app simulados. `pt_a_npz.py` convierte un `.pt` nuevo a `.npz` sin PyTorch.

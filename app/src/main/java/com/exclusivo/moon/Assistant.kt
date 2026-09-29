@@ -73,8 +73,9 @@ class OverlayPanel(private val ctx: Context) {
                 ocupado = true
                 Thread {
                     val r = Api.call(ctx, "/estado?desde=$seq")
+                    val abrio = Acciones.procesar(ctx.applicationContext, r)
                     ocupado = false
-                    ui.post { pintar(r) }
+                    ui.post { pintar(r); if (abrio) onClose?.invoke() }
                 }.start()
             }
             ui.postDelayed(this, 350)
@@ -82,7 +83,10 @@ class OverlayPanel(private val ctx: Context) {
     }
 
     private fun pintar(r: String?) {
-        if (r == null) { error("Sin conexión con Termux", "Inicia voz_servidor.py en Termux"); return }
+        if (r == null) {
+            Termux.iniciarServidor(ctx.applicationContext)
+            error("Sin conexión con Termux", "Intentando iniciar el servidor… si no arranca, ejecuta ./moon.sh"); return
+        }
         val j = try { JSONObject(r) } catch (e: Exception) { return }
         if (j.has("auth")) { error("Token incorrecto", "Revísalo en Moon, pestaña Sistema"); return }
         if (j.getInt("total") < seq) seq = 0
