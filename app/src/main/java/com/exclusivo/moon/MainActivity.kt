@@ -102,7 +102,7 @@ class MainActivity : AppCompatActivity() {
         tvTituloIn = findViewById(R.id.tvTituloIn)
         tvTextoIn = findViewById(R.id.tvTextoIn)
         waveIn = findViewById(R.id.waveIn)
-        vistas = listOf(R.id.vInicio, R.id.vActividad, R.id.vSistema).map { findViewById<View>(it) }
+        vistas = listOf(R.id.vInicio, R.id.scrollAct, R.id.vSistema).map { findViewById<View>(it) }
         tabs = listOf(R.id.tab0, R.id.tab1, R.id.tab2).map { findViewById<TextView>(it) }
         tabs.forEachIndexed { i, t -> t.setOnClickListener { mostrar(i) } }
         mostrar(0)

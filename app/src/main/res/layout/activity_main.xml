@@ -33,8 +33,8 @@
             </LinearLayout>
         </LinearLayout>
 
-        <ScrollView android:layout_width="match_parent" android:layout_height="match_parent">
-            <LinearLayout android:id="@+id/vActividad" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp" android:visibility="gone">
+        <ScrollView android:id="@+id/scrollAct" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone">
+            <LinearLayout android:id="@+id/vActividad" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
                 <TextView android:id="@+id/btnLimpiar" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="end" android:padding="4dp" android:text="Limpiar" android:textColor="@color/moon_accent" android:textSize="13sp" />
                 <LinearLayout android:id="@+id/contAct" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="vertical" />
             </LinearLayout>

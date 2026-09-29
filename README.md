@@ -54,8 +54,9 @@ Franja fina en el borde inferior izquierdo: tocar y deslizar a la derecha abre e
 - Sistema: asistente, servidor, Shizuku, superposición, modelo, gesto y versión (consulta la última release en GitHub, máx. una vez por hora)
 
 ## Pendiente
-- Verificar en el móvil: el botón de hablar de la app (Actividad vacía aunque se hable). Si el texto en vivo de Inicio no aparece, el problema es el micrófono de Termux; probar con `curl -s -H "X-Moon-Token: $(cat .token)" 127.0.0.1:8765/estado` mientras se habla
-- Ajustar la franja del gesto en el Redmi (choque con teclado y barra de gestos)
+- Verificar en el móvil el botón de hablar de la app. Causa hallada: el ScrollView de Actividad seguía visible encima de Inicio y se comía los toques del botón (corregido, falta confirmar). Si el texto en vivo de Inicio no aparece, el problema es el micrófono de Termux; probar con `curl -s -H "X-Moon-Token: $(cat .token)" 127.0.0.1:8765/estado` mientras se habla
+- Gesto de invocación poco fiable (franja de 12 dp muy difícil de acertar y la barra de gestos del sistema compite). Probar primero los gestos nativos del asistente (botón de encendido, esquina); alternativas: tile de ajustes rápidos y botón en la notificación que abran la sesión del asistente. En MIUI: Moon en batería "Sin restricciones" e inicio automático, para que el servicio no se cierre
+- Actualizaciones ligeras: el "cerebro" (voz_servidor.py, comandos.json, skills) se actualiza con `git pull` en Termux (solo baja lo que cambió) y el APK solo cambia cuando cambia la interfaz
 - Duración de la orden en Actividad (ej. "18 s")
 - Skills del asistente: registro de comandos en `comandos.json` (frase -> acción), conectividad, apps, temporizadores, consultas locales, vigilante automático con aviso por SMS
 - Asistente por voz en el móvil de ella
