@@ -21,39 +21,18 @@
             <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal">
                 <TextView android:id="@+id/chipVoz" android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/chip_bg" android:paddingHorizontal="14dp" android:paddingVertical="6dp" android:text="Voz" android:textColor="@color/moon_muted" android:textSize="13sp" />
                 <TextView android:id="@+id/chipAsis" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:background="@drawable/chip_bg" android:paddingHorizontal="14dp" android:paddingVertical="6dp" android:text="Asistente" android:textColor="@color/moon_muted" android:textSize="13sp" />
+                <TextView android:id="@+id/chipGesto" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:background="@drawable/chip_bg" android:paddingHorizontal="14dp" android:paddingVertical="6dp" android:text="Gesto" android:textColor="@color/moon_muted" android:textSize="13sp" />
             </LinearLayout>
         </LinearLayout>
 
-        <LinearLayout android:id="@+id/vActividad" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="20dp" android:visibility="gone">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
-                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Transcripciones de esta sesión" android:textColor="@color/moon_muted" android:textSize="13sp" />
-                <TextView android:id="@+id/btnLimpiar" android:layout_width="wrap_content" android:layout_height="wrap_content" android:padding="4dp" android:text="Limpiar" android:textColor="@color/moon_accent" android:textSize="13sp" />
+        <ScrollView android:layout_width="match_parent" android:layout_height="match_parent">
+            <LinearLayout android:id="@+id/vActividad" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp" android:visibility="gone">
+                <TextView android:id="@+id/btnLimpiar" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="end" android:padding="4dp" android:text="Limpiar" android:textColor="@color/moon_accent" android:textSize="13sp" />
+                <LinearLayout android:id="@+id/contAct" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="vertical" />
             </LinearLayout>
-            <ScrollView android:id="@+id/scroll" android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="12dp" android:layout_weight="1">
-                <TextView android:id="@+id/tvHist" android:layout_width="match_parent" android:layout_height="wrap_content" android:lineSpacingExtra="4dp" android:textColor="@color/moon_text" android:textSize="17sp" />
-            </ScrollView>
-        </LinearLayout>
-
+        </ScrollView>
         <ScrollView android:id="@+id/vSistema" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/card_bg" android:orientation="vertical" android:padding="16dp">
-                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
-                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Asistente predeterminado" android:textColor="@color/moon_text" android:textSize="15sp" />
-                        <TextView android:id="@+id/stAsis" android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/chip_bg" android:paddingHorizontal="12dp" android:paddingVertical="5dp" android:textColor="@color/moon_muted" android:textSize="12sp" />
-                    </LinearLayout>
-                    <TextView android:id="@+id/btnAsis" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingVertical="10dp" android:text="Abrir ajustes del asistente" android:textColor="@color/moon_accent" android:textSize="14sp" />
-                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:gravity="center_vertical">
-                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Servidor de voz" android:textColor="@color/moon_text" android:textSize="15sp" />
-                        <TextView android:id="@+id/stVoz" android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/chip_bg" android:paddingHorizontal="12dp" android:paddingVertical="5dp" android:textColor="@color/moon_muted" android:textSize="12sp" />
-                    </LinearLayout>
-                    <EditText android:id="@+id/etToken" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:hint="Token que imprime voz_servidor.py" android:inputType="textNoSuggestions" android:singleLine="true" android:textColor="@color/moon_text" android:textColorHint="@color/moon_muted" android:textSize="14sp" />
-                    <TextView android:id="@+id/btnToken" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingVertical="10dp" android:text="Guardar token" android:textColor="@color/moon_accent" android:textSize="14sp" />
-                </LinearLayout>
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:background="@drawable/card_bg" android:orientation="vertical" android:padding="16dp">
-                    <TextView android:id="@+id/tvVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="@color/moon_text" android:textSize="15sp" android:textStyle="bold" />
-                    <TextView android:id="@+id/btnUpd" android:layout_width="wrap_content" android:layout_height="wrap_content" android:paddingTop="8dp" android:text="Buscar actualización" android:textColor="@color/moon_accent" android:textSize="14sp" />
-                </LinearLayout>
-            </LinearLayout>
+            <LinearLayout android:id="@+id/contSis" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp" />
         </ScrollView>
     </FrameLayout>
 

@@ -29,42 +29,42 @@ class MoonRecognitionService : RecognitionService() {
 }
 
 class MoonSession(ctx: Context) : VoiceInteractionSession(ctx) {
+    private val panel = OverlayPanel(ctx)
+    override fun onCreateContentView(): View { panel.onClose = { hide() }; return panel.view }
+    override fun onShow(args: Bundle?, showFlags: Int) { super.onShow(args, showFlags); panel.start() }
+    override fun onHide() { panel.stop(); super.onHide() }
+}
+
+/** Overlay de escucha: lo usan el asistente del sistema y el gesto de esquina. */
+class OverlayPanel(private val ctx: Context) {
+    val view: View = LayoutInflater.from(ctx).inflate(R.layout.overlay, null)
+    var onClose: (() -> Unit)? = null
     private val ui = Handler(Looper.getMainLooper())
     private var seq = 0
     private var ultimo = ""
     private var ocupado = false
-    private lateinit var v: View
-    private lateinit var titulo: TextView
-    private lateinit var texto: TextView
-    private lateinit var pEscucha: View
-    private lateinit var pOrden: View
-    private lateinit var pasos: List<TextView>
+    private val titulo = view.findViewById<TextView>(R.id.ovTitulo)
+    private val texto = view.findViewById<TextView>(R.id.ovTexto)
+    private val pEscucha = view.findViewById<View>(R.id.ovEscucha)
+    private val pOrden = view.findViewById<View>(R.id.ovOrden)
+    private val pasos = listOf(R.id.paso1, R.id.paso2, R.id.paso3).map { view.findViewById<TextView>(it) }
 
-    override fun onCreateContentView(): View {
-        v = LayoutInflater.from(context).inflate(R.layout.overlay, null)
-        titulo = v.findViewById(R.id.ovTitulo)
-        texto = v.findViewById(R.id.ovTexto)
-        pEscucha = v.findViewById(R.id.ovEscucha)
-        pOrden = v.findViewById(R.id.ovOrden)
-        pasos = listOf(R.id.paso1, R.id.paso2, R.id.paso3).map { v.findViewById<TextView>(it) }
-        v.findViewById<View>(R.id.scrim).setOnClickListener { hide() }
-        v.findViewById<View>(R.id.ovStop).setOnClickListener { hide() }
-        return v
+    init {
+        view.findViewById<View>(R.id.scrim).setOnClickListener { onClose?.invoke() }
+        view.findViewById<View>(R.id.ovStop).setOnClickListener { onClose?.invoke() }
     }
 
-    override fun onShow(args: Bundle?, showFlags: Int) {
-        super.onShow(args, showFlags)
+    fun start() {
         seq = 0; ultimo = ""
         titulo.text = "Escuchando"; texto.text = ""
         pEscucha.visibility = View.VISIBLE; pOrden.visibility = View.GONE
-        Thread { Api.call(context, "/escuchar", "POST") }.start()
+        Thread { Api.call(ctx, "/escuchar", "POST") }.start()
         ui.post(poll)
     }
 
-    override fun onHide() {
+    fun stop() {
         ui.removeCallbacks(poll)
-        Thread { Api.call(context, "/parar", "POST") }.start()
-        super.onHide()
+        Thread { Api.call(ctx, "/parar", "POST") }.start()
     }
 
     private val poll = object : Runnable {
@@ -72,7 +72,7 @@ class MoonSession(ctx: Context) : VoiceInteractionSession(ctx) {
             if (!ocupado) {
                 ocupado = true
                 Thread {
-                    val r = Api.call(context, "/estado?desde=$seq")
+                    val r = Api.call(ctx, "/estado?desde=$seq")
                     ocupado = false
                     ui.post { pintar(r) }
                 }.start()

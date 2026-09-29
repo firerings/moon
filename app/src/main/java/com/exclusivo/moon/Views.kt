@@ -43,3 +43,22 @@ class MoonView(c: Context, a: AttributeSet?) : View(c, a) {
         cv.drawPath(a, p)
     }
 }
+
+class GlowView(c: Context, a: AttributeSet?) : View(c, a) {
+    private val p = Paint()
+    private var t = 0f
+    private val an = ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = 2600; repeatCount = ValueAnimator.INFINITE; interpolator = LinearInterpolator()
+        addUpdateListener { t = it.animatedValue as Float; invalidate() }
+    }
+    override fun onAttachedToWindow() { super.onAttachedToWindow(); an.start() }
+    override fun onDetachedFromWindow() { an.cancel(); super.onDetachedFromWindow() }
+    override fun onDraw(cv: Canvas) {
+        val w = width.toFloat(); val h = height.toFloat()
+        val a = 0.55f + 0.25f * sin(t * 6.2832f)
+        p.shader = RadialGradient(w / 2, h, w * 0.9f, intArrayOf(((a * 255).toInt() shl 24) or 0x8AB4FF, 0x008AB4FF), null, Shader.TileMode.CLAMP)
+        cv.drawRect(0f, 0f, w, h, p)
+        p.shader = RadialGradient(w * (0.1f + 0.8f * abs(2 * t - 1f)), h, w * 0.5f, intArrayOf(0x66B79CFF, 0x00B79CFF), null, Shader.TileMode.CLAMP)
+        cv.drawRect(0f, 0f, w, h, p)
+    }
+}
