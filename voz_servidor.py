@@ -303,6 +303,7 @@ except ValueError:
 
 
 COLA = queue.Queue()
+DIAG = {"arranque": time.time(), "audio_fallos": 0, "audio_ultimo_fallo": 0.0, "audio_ultimo_ok": 0.0}   # para /diagnostico
 ACC = {"sid": secrets.token_hex(3), "n": 0, "items": []}   # acciones que la app Moon ejecuta
 VISTO = {"t": 0.0}                                          # ultima vez que la app pregunto /estado
 
@@ -332,7 +333,7 @@ def acciones_pendientes():
     for a in ACC["items"]:
         if not a["ack"] and ahora - a["t"] < 20:
             a["servida"] = True
-            out.append({k: a[k] for k in ("id", "tipo", "pkg", "nombre", "texto") if k in a})
+            out.append({k: a[k] for k in ("id", "tipo", "pkg", "nombre", "texto", "modo", "cid") if k in a})
     return out
 
 
@@ -389,6 +390,8 @@ def escuchar(auto=False):
             if data is None:                       # medio segundo sin audio
                 if time.time() - sin > SIN_AUDIO:
                     fallos += 1
+                    DIAG["audio_fallos"] += 1
+                    DIAG["audio_ultimo_fallo"] = time.time()
                     acciones.log_evento({"tipo": "audio_sin_datos", "donde": "escucha", "intento": fallos})
                     cerrar_parec(p)
                     p = None
@@ -401,6 +404,7 @@ def escuchar(auto=False):
             if not data:                           # parec se cerro
                 break
             sin = time.time()
+            DIAG["audio_ultimo_ok"] = sin
             if CEREBRO.callando():
                 mudo = True
                 ult = time.time()
@@ -516,9 +520,34 @@ def vigilar_luna():
             LUNA["hilo"] = False
 
 
+def _resumen_archivo(nombre, clave):
+    """(cantidad, segundos desde que se sincronizó) de apps_app.json / contactos.json; (0, None) si no existe."""
+    try:
+        with open(os.path.join(DIR, nombre), encoding="utf-8") as f:
+            d = json.load(f)
+        return len(d[clave]), round(time.time() - float(d.get("t", 0)))
+    except (OSError, ValueError, KeyError, TypeError):
+        return 0, None
+
+
+def diagnostico():
+    ahora = time.time()
+    na, ta = _resumen_archivo("apps_app.json", "apps")
+    nc, tc = _resumen_archivo("contactos.json", "contactos")
+
+    def hace(t):
+        return round(ahora - t) if t else None
+    return {"shizuku": shizuku_activo(), "modelo": modelo_corto(), "nlu": NLU_MODELO is not None,
+            "comandos": len(CEREBRO.comandos), "escuchando": E["escuchando"], "luna": LUNA["hilo"],
+            "ahorro": CEREBRO.ahorro, "apps": na, "apps_hace": ta, "contactos": nc, "contactos_hace": tc,
+            "audio_fallos": DIAG["audio_fallos"], "audio_fallo_hace": hace(DIAG["audio_ultimo_fallo"]),
+            "audio_ok_hace": hace(DIAG["audio_ultimo_ok"]), "activo_hace": round(ahora - DIAG["arranque"]),
+            "ajustes": acciones.leer_ajustes()}
+
+
 class H(BaseHTTPRequestHandler):
     def _j(self, obj, code=200):
-        b = json.dumps(obj, ensure_ascii=False).encode()
+        b = json.dumps(obj, ensure_ascii=False, default=str).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(b)))
@@ -563,6 +592,10 @@ class H(BaseHTTPRequestHandler):
             self._j({"n": LUNA["n"], "activo": LUNA["hilo"]})
         elif u.path == "/sistema":
             self._j({"shizuku": shizuku_activo(), "modelo": modelo_corto()})
+        elif u.path == "/diagnostico":
+            self._j(diagnostico())
+        elif u.path == "/ajustes":
+            self._j(acciones.leer_ajustes())
         else:
             self._j({"error": "no existe"}, 404)
 
@@ -595,14 +628,46 @@ class H(BaseHTTPRequestHandler):
                 self._j({"ok": True, "n": len(lista)})
             except (ValueError, KeyError, TypeError, OSError):
                 self._j({"error": "formato"}, 400)
+        elif u.path == "/contactos":
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            if n <= 0 or n > 2000000:
+                return self._j({"error": "tamano"}, 413)
+            try:
+                lista = [{"i": str(x["i"]), "n": str(x["n"])[:80]} for x in json.loads(self.rfile.read(n))]
+                ruta = os.path.join(DIR, "contactos.json")
+                with open(ruta + ".tmp", "w", encoding="utf-8") as f:
+                    json.dump({"t": time.time(), "contactos": lista}, f, ensure_ascii=False)
+                os.replace(ruta + ".tmp", ruta)
+                acciones.log_evento({"tipo": "contactos_sincronizados", "n": len(lista)})
+                self._j({"ok": True, "n": len(lista)})
+            except (ValueError, KeyError, TypeError, OSError):
+                self._j({"error": "formato"}, 400)
+        elif u.path == "/probar":
+            d = self._cuerpo_json(2000)
+            texto = str((d or {}).get("texto", "")).strip()[:300]
+            if not texto:
+                return self._j({"error": "formato"}, 400)
+            try:
+                self._j({"ok": True, **CEREBRO.probar(texto)})
+            except Exception as e:
+                self._j({"ok": False, "error": repr(e)}, 500)
+        elif u.path == "/ajustes":
+            d = self._cuerpo_json(500) or {}
+            self._j({"ok": acciones.guardar_ajuste(str(d.get("clave", "")), d.get("valor"))})
         elif u.path == "/ack":
             q = parse_qs(u.query)
             try:
                 i, ok = int(q["id"][0]), q.get("ok", ["0"])[0] == "1"
             except (KeyError, ValueError):
                 return self._j({"error": "parametros"}, 400)
+            datos = None
+            if "pct" in q:                                   # la bateria que lee la app
+                try:
+                    datos = {"pct": int(q["pct"][0]), "carg": q.get("carg", ["0"])[0] == "1"}
+                except ValueError:
+                    datos = None
             marcar_ack(i)
-            CEREBRO.resultado_app(i, ok)
+            CEREBRO.resultado_app(i, ok, datos)
             self._j({"ok": True})
         elif u.path == "/corregir":
             d = self._cuerpo_json()

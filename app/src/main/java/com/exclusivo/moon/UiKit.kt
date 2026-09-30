@@ -2,8 +2,11 @@ package com.exclusivo.moon
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
+import android.view.View
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
@@ -61,6 +64,35 @@ class UiKit(private val ctx: Context, private val prefs: SharedPreferences) {
         })
         cont.addView(sb)
         return cont
+    }
+
+    /** Color de un semáforo: 0 gris (sin dato), 1 verde (bien), 2 ámbar (aviso), 3 rojo (mal). */
+    fun colorSemaforo(n: Int): Int = when (n) {
+        1 -> c(R.color.moon_ok)
+        2 -> Color.parseColor("#FFC857")
+        3 -> c(R.color.moon_bad)
+        else -> c(R.color.moon_muted)
+    }
+
+    /** Fila con un punto de color, el título y un texto de estado a la derecha. */
+    class Semaforo(val fila: LinearLayout, private val punto: View, private val estado: TextView, private val kit: UiKit) {
+        fun poner(n: Int, txt: String) {
+            punto.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(kit.colorSemaforo(n)) }
+            estado.text = txt
+            estado.setTextColor(kit.colorSemaforo(n))
+        }
+    }
+
+    fun semaforo(t: String, accion: () -> Unit = {}): Semaforo {
+        val r = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(12), 0, dp(12)); setOnClickListener { accion() } }
+        val punto = View(ctx)
+        r.addView(punto, LinearLayout.LayoutParams(dp(12), dp(12)).apply { marginEnd = dp(12) })
+        r.addView(tv(t, 15f, c(R.color.moon_text)), LinearLayout.LayoutParams(0, -2, 1f))
+        val ch = tv("—", 12f, c(R.color.moon_muted)).apply { setBackgroundResource(R.drawable.chip_bg); setPadding(dp(12), dp(5), dp(12), dp(5)) }
+        r.addView(ch)
+        val s = Semaforo(r, punto, ch, this)
+        s.poner(0, "—")
+        return s
     }
 
     fun boton(t: String, primario: Boolean, accion: () -> Unit) =

@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import subprocess
+import threading
 import time
 
 from . import config as cfg
@@ -51,13 +52,47 @@ class SistemaMixin:
         s = "Es la una" if h == 1 else "Son las %d" % h
         return s + (" en punto" if m == 0 else " y media" if m == 30 else " y %d" % m)
 
-    def _estado_bateria(self):
+    # ---------- pedir algo a la app Moon y esperar su respuesta ----------
+    def _pedir_app(self, accion, espera=None):
+        """Manda una accion a la app Moon y espera su confirmacion. Devuelve {"ok", "datos"} o None si la
+        app no esta conectada, no la recogio o no contesto a tiempo (entonces se usa el respaldo de Termux)."""
+        env = self.env
+        if not (env.get("app_activa") and env["app_activa"]() and env.get("enviar")):
+            return None
+        i = env["enviar"](accion)
+        h = {"ev": threading.Event(), "ok": None, "datos": None}
+        self._habla[i] = h
+        try:
+            fin = time.time() + cfg.ESPERA_ENTREGA
+            while not env["servida"](i):
+                if time.time() > fin:
+                    env["cancelar"](i)
+                    return None
+                time.sleep(0.05)
+            if not h["ev"].wait(espera or cfg.ESPERA_ORDEN_APP):
+                env["cancelar"](i)
+                return None
+            return {"ok": bool(h["ok"]), "datos": h["datos"]}
+        finally:
+            self._habla.pop(i, None)
+
+    def _bateria_termux(self):
         try:
             r = subprocess.run(["termux-battery-status"], capture_output=True, text=True, timeout=10)
             d = json.loads(r.stdout)
             return int(d["percentage"]), str(d.get("status", "")).upper() == "CHARGING"
         except Exception:
             return None
+
+    def _estado_bateria(self):
+        """Primero la app Moon (instantaneo, sin lanzar procesos); si no responde, Termux."""
+        r = self._pedir_app({"tipo": "bateria"})
+        if r and r["ok"] and isinstance(r["datos"], dict):
+            try:
+                return int(r["datos"]["pct"]), bool(r["datos"]["carg"])
+            except (KeyError, TypeError, ValueError):
+                pass
+        return self._bateria_termux()
 
     def _a_bateria(self, a):
         st = self.env.get("bateria", self._estado_bateria)()
@@ -67,7 +102,10 @@ class SistemaMixin:
         return "La batería está al %d por ciento%s" % (pct, " y está cargando" if carg else "")
 
     def _linterna(self, modo):
-        subprocess.run(["termux-torch", modo], timeout=10)
+        """Camino normal: la app Moon (CameraManager, instantaneo). Respaldo: termux-torch (~6 s)."""
+        r = self._pedir_app({"tipo": "linterna", "modo": modo})
+        if not (r and r["ok"]):
+            subprocess.run(["termux-torch", modo], timeout=10)
         return "Linterna encendida" if modo == "on" else "Linterna apagada"
 
     def _set_ahorro(self, on):

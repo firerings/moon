@@ -19,14 +19,15 @@ import threading
 import time
 
 from . import config as cfg
-from . import apps, sistema
+from . import apps, sistema, llamadas
 from .util import norm, log_evento
 from .voz import VozMixin
 from .dialogo import DialogoMixin
 from .apps import AppsMixin
 from .sistema import SistemaMixin
+from .llamadas import LlamadasMixin
 
-NOMBRES = {**apps.NOMBRES, **sistema.NOMBRES}
+NOMBRES = {**apps.NOMBRES, **sistema.NOMBRES, **llamadas.NOMBRES}
 
 
 def _ejecutar_rish(cmd, timeout=10):
@@ -42,7 +43,7 @@ def _tts_termux(texto):
     subprocess.run(["termux-tts-speak", "-l", "es", texto], timeout=40)
 
 
-class Cerebro(VozMixin, DialogoMixin, AppsMixin, SistemaMixin):
+class Cerebro(VozMixin, DialogoMixin, AppsMixin, SistemaMixin, LlamadasMixin):
     """env (todo opcional salvo iniciar/parar/escuchando/reiniciar/ui):
        rish(cmd, timeout)->(ok, salida)   tts(texto)   ui(dict)   reiniciar()->str|None
        iniciar(auto=False)   parar()   escuchando()->bool"""
@@ -63,7 +64,7 @@ class Cerebro(VozMixin, DialogoMixin, AppsMixin, SistemaMixin):
         self.ahorro = self._cargar_estado().get("ahorro", False)
         self.comandos = self._cargar_comandos()
         self.acciones = {}
-        for skill in (self._acciones_apps, self._acciones_sistema):
+        for skill in (self._acciones_apps, self._acciones_sistema, self._acciones_llamadas):
             self.acciones.update(skill())
 
     # ---------- configuracion ----------
@@ -103,6 +104,10 @@ class Cerebro(VozMixin, DialogoMixin, AppsMixin, SistemaMixin):
                 if verbo != "ahora" or self.resolver_app(app, self.apps_instaladas()):
                     reg.update(via="regla", entidades={"app": app})
                     return self._ejecutar(accion, {"app": app}, False, reg, t0)
+            contacto = self._regla_llamada(tn)
+            if contacto:
+                reg.update(via="regla", entidades={"contacto": contacto})
+                return self._ejecutar("llamar", {"contacto": contacto}, False, reg, t0)
             if not self.nlu:
                 reg.update(via="ninguna", motivo="sin_nlu")
                 return log_evento(reg)
@@ -119,6 +124,9 @@ class Cerebro(VozMixin, DialogoMixin, AppsMixin, SistemaMixin):
                 reg.update(ok=False, motivo="baja_confianza")
                 log_evento(reg)
                 return self.hablar("No te entendí bien")
+            if it == "llamar":
+                contacto = ent.get("contacto") or r.get("contacto_candidato") or ""
+                return self._ejecutar("llamar", {"contacto": contacto}, False, reg, t0)
             if it in ("abrir_app", "cerrar_app"):
                 if not ent.get("app"):
                     reg.update(ok=False, motivo="sin_app")
@@ -129,6 +137,64 @@ class Cerebro(VozMixin, DialogoMixin, AppsMixin, SistemaMixin):
             log_evento(reg)
             return self.hablar("Todavía no sé hacer eso")
 
+
+    def probar(self, texto):
+        """Qué haría Moon con esta frase, SIN ejecutar nada ni hablar (caja «Probar frase» de la app)."""
+        tn = norm(texto)
+        out = {"norm": tn, "via": "ninguna", "accion": "", "nombre": "", "entidades": {}, "detalle": ""}
+        if not tn:
+            return out
+        cmd = self._buscar_comando(tn)
+        if cmd:
+            return self._decision(out, "comando", cmd["accion"], {}, cmd["confirmar"])
+        regla = self._regla_app(tn)
+        if regla:
+            accion, app, verbo = regla
+            r = self.resolver_app(app, self.apps_instaladas())
+            if verbo != "ahora" or r:
+                out = self._decision(out, "regla", accion, {"app": app}, False)
+                out["detalle"] = ("App: %s (%.2f)" % (r["nombre"], r["score"])) if r else "No encuentro esa app"
+                return out
+        contacto = self._regla_llamada(tn)
+        if contacto:
+            return self._decision_llamada(out, "regla", contacto)
+        if not self.nlu:
+            out["detalle"] = "Sin modelo NLU"
+            return out
+        r = self.nlu.procesar(texto)
+        ent = {k: r[k] for k in ("app", "contacto", "mensaje", "canal") if k in r}
+        out.update(via="nlu", intent=r["intent"], confianza=r["confianza"], entidades=ent)
+        it = r["intent"]
+        if it == "conversar":
+            out["detalle"] = "Charla: no hace nada"
+        elif it == "salir":
+            out = self._decision(out, "nlu", "parar", {}, False)
+        elif r["confianza"] < cfg.UMBRAL_INTENT:
+            out["detalle"] = "Confianza baja: diría «No te entendí bien»"
+        elif it == "llamar":
+            out = self._decision_llamada(out, "nlu", ent.get("contacto") or r.get("contacto_candidato") or "")
+        elif it in ("abrir_app", "cerrar_app"):
+            ap = self.resolver_app(ent.get("app", ""), self.apps_instaladas()) if ent.get("app") else None
+            out = self._decision(out, "nlu", it, {"app": ent.get("app", "")}, False)
+            out["detalle"] = ("App: %s (%.2f)" % (ap["nombre"], ap["score"])) if ap else "No encuentro esa app"
+        else:
+            out["detalle"] = "Todavía no sé hacer eso"
+        return out
+
+    def _decision(self, out, via, accion, ent, confirmar):
+        out.update(via=via, accion=accion, nombre=NOMBRES.get(accion, accion), entidades=ent)
+        out["detalle"] = "Pediría confirmación" if confirmar else "Lo ejecutaría"
+        return out
+
+    def _decision_llamada(self, out, via, contacto):
+        out = self._decision(out, via, "llamar", {"contacto": contacto}, False)
+        if not self._contactos():
+            out["detalle"] = "Todavía no hay contactos sincronizados"
+            return out
+        c = self.buscar_contactos(contacto)
+        out["detalle"] = ("Preguntaría por: " + ", ".join("%s (%.2f)" % (self._nombre_corto(x), x["score"]) for x in c)) \
+            if c else "No encuentro ese contacto"
+        return out
 
     def _buscar_comando(self, tn):
         toks = tn.split()

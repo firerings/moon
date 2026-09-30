@@ -30,3 +30,37 @@ def log_evento(reg):
                 f.write(json.dumps(reg, ensure_ascii=False) + "\n")
     except OSError:
         pass
+
+
+# ---------- ajustes del servidor (ajustes.json), editables desde la app Moon ----------
+AJUSTES_DEF = {"confirmar_llamadas": True}
+
+
+def leer_ajustes():
+    """Ajustes con sus valores por defecto; lo que no esté (o esté mal) en ajustes.json se ignora."""
+    out = dict(AJUSTES_DEF)
+    try:
+        with open(os.path.join(cfg.DIR, "ajustes.json"), encoding="utf-8") as f:
+            datos = json.load(f)
+        for k, v in AJUSTES_DEF.items():
+            if isinstance(datos.get(k), type(v)):
+                out[k] = datos[k]
+    except Exception:
+        pass
+    return out
+
+
+def guardar_ajuste(clave, valor):
+    """Guarda un ajuste conocido (True si se pudo). Escritura atómica."""
+    if clave not in AJUSTES_DEF or not isinstance(valor, type(AJUSTES_DEF[clave])):
+        return False
+    datos = leer_ajustes()
+    datos[clave] = valor
+    ruta = os.path.join(cfg.DIR, "ajustes.json")
+    try:
+        with open(ruta + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(datos, f, ensure_ascii=False, indent=1)
+        os.replace(ruta + ".tmp", ruta)
+        return True
+    except OSError:
+        return False

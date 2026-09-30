@@ -236,11 +236,13 @@ class AppsMixin:
             return "Abriendo %s" % r["nombre"]
         return ("Abriendo %s" % r["nombre"]) if self._lanzar_shizuku(r) else "No pude abrir %s" % r["nombre"]
 
-    def resultado_app(self, i, ok):
-        """La app Moon confirma (ok) o dice que no pudo (abrir una app / terminar de hablar)."""
+    def resultado_app(self, i, ok, datos=None):
+        """La app Moon confirma (ok) o dice que no pudo (abrir una app / terminar de hablar / linterna /
+        bateria / llamada). `datos` lleva lo que devuelve (p. ej. la bateria)."""
         h = self._habla.get(i)
         if h is not None:
             h["ok"] = bool(ok)
+            h["datos"] = datos
             h["ev"].set()
             return
         r = self._abiertas.pop(i, None)

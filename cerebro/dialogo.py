@@ -68,7 +68,10 @@ class DialogoMixin:
         try:
             self.hablar((p["si"] if r == "si" else p["no"])())
         finally:
-            self._cerrar_auto(p)
+            if self.pendiente is None:
+                self._cerrar_auto(p)
+            elif p.get("auto"):
+                self.pendiente["auto"] = True      # la respuesta abrio otra pregunta: hereda el cierre de la escucha
 
     def _expirar(self, p):
         with self._lock:

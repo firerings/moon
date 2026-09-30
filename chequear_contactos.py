@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Mide cuántos nombres de contactos puede llegar a oír Vosk (100% offline).
 
-Uso:  python3 chequear_contactos.py contactos_nombres.txt [carpeta_del_modelo]
-Lee un nombre por línea, separa las palabras que importan (sin prefijos tipo «H -», sin «de/del/la»,
+Uso:  python3 chequear_contactos.py [contactos.json | nombres.txt] [carpeta_del_modelo]
+Sin argumentos lee contactos.json, el archivo que guarda el servidor cuando la app Moon sincroniza tus contactos.
+Con un .txt lee un nombre por línea, separa las palabras que importan (sin prefijos tipo «H -», sin «de/del/la»,
 sin emojis ni números) y comprueba cuáles existen en el vocabulario del modelo de voz (words.txt si lo trae; si no, se lo pregunta a Vosk).
 Una palabra que no está en el vocabulario Vosk nunca la va a escribir bien: hay que llegar a ella
 por parecido de sonido o por un alias.
 """
-import os, re, sys, unicodedata
+import json, os, re, sys, unicodedata
 
 MODELO = "/storage/emulated/0/Download/ProyectosTermux/Models/vosk-model-small-es-0.42"
 RELLENO = {"de", "del", "la", "el", "los", "las", "mi", "mis", "su", "sus", "por", "al", "en", "con", "y", "un", "una",
@@ -50,10 +51,19 @@ def buscador(carpeta):
     return lambda p: any(m.vosk_model_find_word(v) >= 0 for v in variantes(p))
 
 
+def leer_nombres(ruta):
+    """Nombres de un contactos.json ({"contactos": [{"i", "n"}]}) o de un .txt con un nombre por línea."""
+    if ruta.endswith(".json"):
+        with open(ruta, encoding="utf-8") as f:
+            return [str(x["n"]).strip() for x in json.load(f)["contactos"] if str(x.get("n", "")).strip()]
+    return [l.strip() for l in open(ruta, encoding="utf-8", errors="ignore") if l.strip()]
+
+
 def main():
-    if len(sys.argv) < 2:
-        sys.exit(__doc__)
-    nombres = [l.strip() for l in open(sys.argv[1], encoding="utf-8", errors="ignore") if l.strip()]
+    ruta = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "contactos.json")
+    if not os.path.exists(ruta):
+        sys.exit("No encuentro %s. Abre la app Moon (Sistema > Contactos y llamadas > Sincronizar) o pasa un .txt.\n\n%s" % (ruta, __doc__))
+    nombres = leer_nombres(ruta)
     esta = buscador(sys.argv[2] if len(sys.argv) > 2 else MODELO)
     total = dentro = 0
     sin_alcance = []

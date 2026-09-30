@@ -38,6 +38,7 @@ object Acciones {
             }
         }
         sincronizarApps(ctx, false)
+        Contactos.sincronizar(ctx, false)
         return abrio
     }
 
@@ -48,8 +49,9 @@ object Acciones {
             return false
         }
         var ok = false
-        if (tipo == "abrir") {
-            try {
+        var extra = ""
+        when (tipo) {
+            "abrir" -> try {
                 val i = ctx.packageManager.getLaunchIntentForPackage(a.getString("pkg"))
                 if (i != null) {
                     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -57,9 +59,16 @@ object Acciones {
                     ok = true
                 }
             } catch (e: Exception) { }
+            "linterna" -> ok = Telefono.linterna(ctx, a.optString("modo") == "on")
+            "bateria" -> {
+                val b = Telefono.bateria(ctx)
+                if (b != null) { ok = true; extra = "&pct=" + b.first + "&carg=" + (if (b.second) 1 else 0) }
+            }
+            "llamar" -> ok = Contactos.llamar(ctx, a.optString("cid"))
         }
-        Api.call(ctx, "/ack?id=" + a.getInt("id") + "&ok=" + (if (ok) 1 else 0), "POST")
-        return ok
+        Api.call(ctx, "/ack?id=" + a.getInt("id") + "&ok=" + (if (ok) 1 else 0) + extra, "POST")
+        // Solo abrir una app o marcar una llamada pasa a otra pantalla: el overlay se cierra para no taparla.
+        return ok && (tipo == "abrir" || tipo == "llamar")
     }
 
     /** Sigue consultando unos segundos (sin pantalla) para que llegue lo que Moon dice tras abrir una app. */

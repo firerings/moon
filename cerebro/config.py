@@ -16,3 +16,7 @@ ESPERA_ACK = 4              # segundos que se espera a que la app Moon confirme
 BATERIA_BAJA = 20           # % a partir del cual pregunta por el modo ahorro
 BATERIA_OK = 35             # % a partir del cual vuelve a poder preguntar
 REVISION_BATERIA = 120      # cada cuantos segundos mira la bateria
+ESPERA_ORDEN_APP = 2.5      # segundos que se espera a que la app Moon ejecute linterna/bateria/llamada
+UMBRAL_CONTACTO = 0.72      # parecido minimo (de sonido) para proponer un contacto
+UMBRAL_DIRECTO = 0.9        # parecido a partir del cual se llama sin preguntar (si la confirmacion esta apagada)
+MAX_CANDIDATOS = 3          # contactos parecidos que se proponen, uno a uno

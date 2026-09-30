@@ -44,7 +44,8 @@ def iniciar(auto=False): S["esc"] = True
 def parar(): S["esc"] = False
 
 
-ACC = {"n": 0, "enviadas": [], "activa": False, "ult_abrir": 0, "modo_voz": "ok", "entregadas": set()}
+ACC = {"n": 0, "enviadas": [], "activa": False, "ult_abrir": 0, "modo_voz": "ok", "entregadas": set(),
+       "pedidas": [], "resp": {}}      # pedidas: linterna/bateria/llamar; resp: tipo -> (ok, datos) que contesta la app simulada
 
 
 def enviar(a):
@@ -58,6 +59,11 @@ def enviar(a):
                 S["dicho"].append(a["texto"]); S["nativo"] += 1
             threading.Timer(0.02, lambda: c.resultado_app(i, ACC["modo_voz"] == "ok")).start()
         # modo "no_recoge": la app no la recibe nunca
+    elif a["tipo"] in ("linterna", "bateria", "llamar"):
+        ACC["pedidas"].append(a)
+        ACC["entregadas"].add(i)
+        ok, datos = ACC["resp"].get(a["tipo"], (True, None))
+        threading.Timer(0.02, lambda: c.resultado_app(i, ok, datos)).start()
     else:
         ACC["enviadas"].append(a)
         ACC["ult_abrir"] = i
@@ -109,7 +115,7 @@ if nlu:
     chequear("cerrar app usa force-stop", dice("cierra whatsapp") == "Cerré whatsapp" and
              any("force-stop com.whatsapp" in x for x in S["rish"]))
     chequear("charla no responde", dice("hola como estas") is None)
-    chequear("llamar aún no implementado", dice("llama a mi mama") == "Todavía no sé hacer eso")
+    chequear("llamar sin contactos sincronizados avisa", (dice("llama a mi mama") or "").startswith("Todavía no tengo tus contactos"))
 r = c.resolver_app("la cámara", PKGS)
 chequear("alias: 'la cámara' -> com.android.camera", r and r["pkg"] == "com.android.camera")
 r = c.resolver_app("galeria", PKGS)
@@ -197,6 +203,91 @@ chequear("cargando -> no pregunta", not c.pendiente)
 # --- ahorro y silencio ---
 c.ahorro = False
 chequear("límite de silencio: normal sin límite, ahorro 20 s", c.limite_silencio() is None and (setattr(c, "ahorro", True) or c.limite_silencio() == 20))
+
+# --- linterna y batería por la app Moon (respaldo: Termux) ---
+import subprocess
+cfg.ESPERA_ORDEN_APP = 0.6
+termux = []
+_run = subprocess.run
+subprocess.run = lambda cmd, *a, **k: termux.append(cmd) or type("R", (), {"stdout": "", "returncode": 0})()
+ACC["activa"] = True
+chequear("linterna: la app la enciende y Termux no interviene",
+         dice("enciende la linterna") == "Linterna encendida"
+         and ACC["pedidas"][-1] == {"tipo": "linterna", "modo": "on"} and not termux)
+chequear("linterna: apagar", dice("apaga la linterna") == "Linterna apagada" and ACC["pedidas"][-1]["modo"] == "off")
+ACC["resp"]["linterna"] = (False, None)
+chequear("linterna: si la app no puede, respalda Termux", dice("enciende la linterna") == "Linterna encendida" and termux == [["termux-torch", "on"]])
+ACC["activa"] = False
+termux.clear()
+chequear("linterna: app desconectada -> Termux", dice("apaga la linterna") == "Linterna apagada" and termux == [["termux-torch", "off"]])
+ACC["activa"] = True
+ACC["resp"]["bateria"] = (True, {"pct": 77, "carg": True})
+chequear("batería: la lee la app", c._estado_bateria() == (77, True))
+ACC["resp"]["bateria"] = (False, None)
+termux.clear()
+subprocess.run = lambda cmd, *a, **k: termux.append(cmd) or type("R", (), {"stdout": '{"percentage": 41, "status": "DISCHARGING"}', "returncode": 0})()
+chequear("batería: sin respuesta de la app, lee Termux", c._estado_bateria() == (41, False) and termux == [["termux-battery-status"]])
+subprocess.run = _run
+ACC["resp"].clear()
+ACC["activa"] = False
+
+# --- llamadas por voz ---
+chequear("llamada: reglas de la frase", c._regla_llamada("llama a daniel lopez") == "daniel lopez"
+         and c._regla_llamada("por favor llama al jefe") == "jefe" and c._regla_llamada("me llama mi mama") is None
+         and c._regla_llamada("llama") is None)
+chequear("llamada: sin contactos sincronizados avisa", (dice("llama a daniel") or "").startswith("Todavía no tengo tus contactos"))
+with open(os.path.join(tmp, "contactos.json"), "w", encoding="utf-8") as f:
+    json.dump({"t": time.time(), "contactos": [
+        {"i": "1", "n": "Daniel Lopez"}, {"i": "2", "n": "H - Daniela Perez 😀"}, {"i": "3", "n": "Beth"},
+        {"i": "4", "n": "Hugo Mamani"}, {"i": "5", "n": "Jessica"}, {"i": "6", "n": "Yesica Rojas"}]}, f)
+chequear("contactos: palabras útiles sin prefijos ni emojis", [x["p"] for x in c._contactos()][1] == ["daniela", "perez"])
+chequear("contactos: parecido de sonido (h muda, b/v, ll/y)", c.buscar_contactos("ugo")[0]["i"] == "4"
+         and c.buscar_contactos("bet")[0]["i"] == "3" and c.buscar_contactos("llesica")[0]["i"] == "6"
+         and c.buscar_contactos("jesica")[0]["i"] == "5")
+chequear("contactos: nada parecido -> vacío", c.buscar_contactos("zzzzqx") == [])
+chequear("llamada: desconocido", dice("llama a zzzzqx") == "No encontré a zzzzqx en tus contactos")
+ACC["activa"] = True
+ACC["pedidas"].clear()
+chequear("llamada: pregunta antes de marcar", dice("llama a daniel") == "¿Llamo a Daniel Lopez?" and c.pendiente and not ACC["pedidas"])
+chequear("llamada: 'no' pasa al siguiente parecido y sigue escuchando",
+         dice("no") == "¿Llamo a Daniela Perez?" and c.pendiente and S["esc"])
+chequear("llamada: 'sí' marca por id (el número no sale del móvil)",
+         dice("si") == "Llamando a Daniela Perez" and ACC["pedidas"][-1] == {"tipo": "llamar", "cid": "2", "nombre": "Daniela Perez"}
+         and not c.pendiente and not S["esc"])
+ACC["pedidas"].clear()
+dice("llama a bet"); dice("si")
+chequear("llamada: nombre exacto no crea alias", not os.path.exists(os.path.join(tmp, "contactos_alias.json")))
+dice("llama a beto"); dice("si")
+chequear("llamada: un parecido aceptado guarda el alias", c.buscar_contactos("beto")[0]["via"] == "alias"
+         and json.load(open(os.path.join(tmp, "contactos_alias.json")))["beto"] == "3")
+json.dump({"mi suegro": "4"}, open(os.path.join(tmp, "contactos_alias.json"), "w"))
+chequear("llamada: alias («mi suegro»)", c.buscar_contactos("a mi suegro")[0]["i"] == "4")
+ACC["pedidas"].clear()
+dice("llama a daniel"); dice("no"); dice("no")
+chequear("llamada: si dice que no a todos, no llama", S["dicho"][-1] == "Está bien, no llamo a nadie" and not ACC["pedidas"] and not c.pendiente)
+ACC["resp"]["llamar"] = (False, None)
+dice("llama a hugo")
+chequear("llamada: la app no puede marcar (permiso)", dice("si").startswith("No pude llamar a Hugo Mamani"))
+ACC["resp"].clear()
+cfg_ok = acciones.guardar_ajuste("confirmar_llamadas", False)
+chequear("llamada: sin confirmación y nombre exacto único, marca directo",
+         cfg_ok and dice("llama a hugo") == "Llamando a Hugo Mamani" and not c.pendiente)
+chequear("llamada: sin confirmación pero con duda, pregunta igual", dice("llama a daniel") == "¿Llamo a Daniel Lopez?" and c.pendiente)
+dice("no"); dice("no")
+acciones.guardar_ajuste("confirmar_llamadas", True)
+ACC["activa"] = False
+chequear("llamada: app cerrada avisa", (dice("llama a hugo") == "¿Llamo a Hugo Mamani?") and dice("si") == "La app Moon no está abierta, no puedo marcar")
+chequear("ajustes: valor desconocido o de tipo malo se rechaza", not acciones.guardar_ajuste("otra", True) and not acciones.guardar_ajuste("confirmar_llamadas", "no"))
+
+# --- probar frase: decide sin ejecutar ---
+ACC["activa"] = True
+ACC["pedidas"].clear(); S["dicho"].clear()
+pr = c.probar("enciende la linterna")
+chequear("probar: comando", pr["via"] == "comando" and pr["accion"] == "linterna_on" and not ACC["pedidas"] and not S["dicho"])
+pr = c.probar("llama a daniel")
+chequear("probar: llamada muestra candidatos sin preguntar", pr["accion"] == "llamar" and "Daniel Lopez" in pr["detalle"] and not c.pendiente and not S["dicho"])
+chequear("probar: abrir app", c.probar("abre whatsapp")["accion"] == "abrir_app" and c.probar("")["via"] == "ninguna")
+ACC["activa"] = False
 
 # --- logs ---
 dia = os.listdir(os.environ["MOON_LOGDIR"])

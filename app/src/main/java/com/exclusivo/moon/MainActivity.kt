@@ -14,7 +14,6 @@ import android.os.Looper
 import android.provider.Settings
 import android.view.View
 import android.view.animation.DecelerateInterpolator
-import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -41,21 +40,12 @@ class MainActivity : Activity() {
     private lateinit var vistas: List<View>
     private lateinit var tabs: List<TextView>
     private lateinit var contAct: LinearLayout
-    private lateinit var sAsis: TextView
-    private lateinit var sVoz: TextView
-    private lateinit var sGesto: TextView
-    private lateinit var sOver: TextView
-    private lateinit var sShz: TextView
-    private lateinit var sMod: TextView
-    private lateinit var tvUpd: TextView
     private lateinit var tvTituloIn: TextView
     private lateinit var tvTextoIn: TextView
     private lateinit var waveIn: View
     private var ultimoTexto = ""
     private var ultAct = -1L
-    private var ultSis = 0L
     private var tabActual = 0
-    private var verApp = "?"
 
     private fun c(id: Int) = getColor(id)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -63,12 +53,12 @@ class MainActivity : Activity() {
     // Piezas compartidas (UiKit) y hoja de detalle de Actividad; se crean al primer uso, ya con prefs listo.
     private val kit by lazy { UiKit(this, prefs) }
     private val detalle by lazy { DetalleActividad(this, kit, ui) { cargarActividad() } }
+    // Pestaña Sistema: categorías, subpantallas y Diagnóstico (Ajustes.kt).
+    private val ajustes by lazy {
+        Ajustes(this, kit, prefs, ui, findViewById<LinearLayout>(R.id.contSis), { asegurarServicio() }, { alternarGesto() })
+    }
 
     private fun tv(t: String, sp: Float, col: Int, bold: Boolean = false) = kit.tv(t, sp, col, bold)
-    private fun tarjeta() = kit.tarjeta()
-    private fun fila(t: String, accion: () -> Unit) = kit.fila(t, accion)
-    private fun filaSwitch(t: String, clave: String, def: Boolean = false, luego: () -> Unit = {}) = kit.filaSwitch(t, clave, def, luego)
-    private fun barra(t: String, clave: String, def: Int, min: Int, max: Int) = kit.barra(t, clave, def, min, max)
 
     private fun tarjetaAct(titulo: String, sub: String, color: Int, o: JSONObject) {
         val card = LinearLayout(this).apply {
@@ -112,94 +102,12 @@ class MainActivity : Activity() {
             Thread { Api.call(this, "/limpiar", "POST") }.start()
             contAct.removeAllViews()
         }
-        construirSistema()
-    }
-
-    /** Pestaña Sistema: estado, token, franja del gesto, formas de activar y versión. */
-    private fun construirSistema() {
-        // Pestaña Sistema
-        val cont = findViewById<LinearLayout>(R.id.contSis)
-        val t1 = tarjeta()
-        val (f1, c1) = fila("Asistente predeterminado") { startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }
-        val (f2, c2) = fila("Servidor de voz") {}
-        val (f3, c3) = fila("Gesto de esquina") { alternarGesto() }
-        val (f4, c4) = fila("Superposición") {
-            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-        }
-        val (f5, c5) = fila("Shizuku") {}
-        val (f6, c6) = fila("Modelo de voz") {}
-        sAsis = c1; sVoz = c2; sGesto = c3; sOver = c4; sShz = c5; sMod = c6
-        marca(sShz, false, "—"); marca(sMod, false, "—")
-        listOf(f1, f2, f5, f4, f6, f3).forEach { t1.addView(it) }
-        val et = EditText(this).apply {
-            hint = "Token que imprime voz_servidor.py"; setText(prefs.getString("token", ""))
-            setTextColor(c(R.color.moon_text)); setHintTextColor(c(R.color.moon_muted)); textSize = 14f; isSingleLine = true
-        }
-        t1.addView(et)
-        t1.addView(tv("Guardar token", 14f, c(R.color.moon_accent)).apply {
-            setPadding(0, dp(10), 0, dp(10))
-            setOnClickListener {
-                prefs.edit().putString("token", et.text.toString().trim()).apply()
-                Toast.makeText(this@MainActivity, "Token guardado", Toast.LENGTH_SHORT).show()
-            }
-        })
-        cont.addView(t1)
-        val t3 = tarjeta()
-        t3.addView(tv("Franja del gesto", 13f, c(R.color.moon_muted)).apply { setPadding(0, dp(10), 0, dp(2)) })
-        t3.addView(filaSwitch("Desbloquear para mover", "fr_mover"))
-        t3.addView(filaSwitch("Ocultar franja", "fr_oculto", true))
-        t3.addView(barra("Alto", "fr_alto", 12, 6, 120))
-        t3.addView(barra("Ancho", "fr_ancho", 56, 16, 320))
-        t3.addView(tv("Restablecer posición y tamaño", 14f, c(R.color.moon_accent)).apply {
-            setPadding(0, dp(12), 0, dp(6))
-            setOnClickListener {
-                prefs.edit().remove("fr_x").remove("fr_sube").remove("fr_alto").remove("fr_ancho").apply()
-                recreate()
-            }
-        })
-        t3.addView(tv("Desbloqueada se ve y se arrastra; al terminar, bloquéala. Oculta es invisible pero sigue funcionando. " +
-            "Necesita el gesto de esquina activo.", 12f, c(R.color.moon_muted)).apply { setPadding(0, 0, 0, dp(10)) })
-        cont.addView(t3, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
-        val t4 = tarjeta()
-        t4.addView(tv("Activar con", 13f, c(R.color.moon_muted)).apply { setPadding(0, dp(10), 0, dp(2)) })
-        t4.addView(filaSwitch("Toque", "fr_toque", true))
-        t4.addView(filaSwitch("Doble toque", "fr_doble", false))
-        t4.addView(filaSwitch("Mantener pulsado", "fr_largo", false))
-        t4.addView(filaSwitch("Deslizar", "fr_desliza", true))
-        t4.addView(tv("Dirección del deslizamiento", 13f, c(R.color.moon_muted)).apply { setPadding(0, dp(10), 0, dp(2)) })
-        t4.addView(filaSwitch("Hacia dentro de la pantalla", "fr_dir_dentro", true))
-        t4.addView(filaSwitch("Izquierda", "fr_dir_izq", true))
-        t4.addView(filaSwitch("Derecha", "fr_dir_der", true))
-        t4.addView(filaSwitch("Arriba", "fr_dir_arr", true))
-        t4.addView(filaSwitch("Abajo", "fr_dir_aba", true))
-        t4.addView(barra("Distancia mínima", "fr_dist", 40, 15, 200))
-        t4.addView(filaSwitch("Vibrar al activar", "fr_vibra", true))
-        t4.addView(tv("«Hacia dentro» se adapta al borde donde pongas la franja y, si está activo, ignora las direcciones sueltas. " +
-            "Con toque activo, el doble toque no hace falta.", 12f, c(R.color.moon_muted)).apply { setPadding(0, dp(6), 0, dp(10)) })
-        cont.addView(t4, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
-        val t5 = tarjeta()
-        t5.addView(tv("Otras formas de activar", 13f, c(R.color.moon_muted)).apply { setPadding(0, dp(10), 0, dp(2)) })
-        t5.addView(filaSwitch("Decir «Luna»", "luna", false) { asegurarServicio() })
-        t5.addView(filaSwitch("Botón del auricular (mantener)", "auricular", false) { asegurarServicio() })
-        t5.addView(tv("«Luna» mantiene el micrófono escuchando, así que gasta batería: actívalo solo cuando lo uses. " +
-            "El auricular deja de controlar tu música con la pulsación corta mientras esté activo.", 12f, c(R.color.moon_muted)).apply { setPadding(0, dp(6), 0, dp(10)) })
-        cont.addView(t5, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
-        val v = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "?" } catch (e: Exception) { "?" }
-        verApp = v
-        val t2 = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundResource(R.drawable.card_bg); setPadding(dp(16), dp(14), dp(16), dp(16)) }
-        t2.addView(tv("Versión $v", 15f, c(R.color.moon_text), true))
-        tvUpd = tv("Las nuevas versiones se publican en GitHub", 13f, c(R.color.moon_muted))
-        t2.addView(tvUpd)
-        t2.addView(tv("Actualizar", 13f, c(R.color.moon_bg), true).apply {
-            setBackgroundResource(R.drawable.pill_btn); setPadding(dp(18), dp(8), dp(18), dp(8))
-            setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Firerings/moon/releases/latest"))) }
-        }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(12) })
-        cont.addView(t2, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
+        ajustes.mostrar(Ajustes.PRINCIPAL)
     }
 
     private fun mostrar(i: Int) {
         tabActual = i
-        if (i == 2) { ultSis = 0; comprobarActualizacion() }
+        if (i == 2) ajustes.alEntrar()
         vistas.forEachIndexed { k, v -> v.visibility = if (k == i) View.VISIBLE else View.GONE }
         tabs.forEachIndexed { k, t -> t.setTextColor(c(if (k == i) R.color.moon_accent else R.color.moon_muted)) }
     }
@@ -235,9 +143,7 @@ class MainActivity : Activity() {
     private fun refrescar() {
         val a = esAsistente(); val o = Settings.canDrawOverlays(this); val g = prefs.getBoolean("gesto", false) && o
         marca(findViewById(R.id.chipAsis), a); marca(findViewById(R.id.chipGesto), g)
-        marca(sAsis, a, if (a) "Activo" else "Sin activar")
-        marca(sGesto, g, if (g) "Activo" else "Apagado")
-        marca(sOver, o, if (o) "Permitida" else "Falta permiso")
+        ajustes.pintar()
     }
 
     override fun onResume() {
@@ -265,26 +171,10 @@ class MainActivity : Activity() {
                     ui.post { pintar(r) }
                 }.start()
             }
-            if (tabActual == 2 && conectado && System.currentTimeMillis() - ultSis > 5000) {
-                ultSis = System.currentTimeMillis()
-                Thread {
-                    val r = Api.call(this@MainActivity, "/sistema", "GET", 7000)
-                    ui.post { pintarSistema(r) }
-                }.start()
-            }
+            if (tabActual == 2) ajustes.tick(conectado)
             ui.postDelayed(this, 400)
         }
     }
-
-    private fun mostrarUpd(tag: String) {
-        if (tag.isEmpty()) return
-        val hay = Actualizaciones.hayNueva(tag, verApp)
-        tvUpd.text = if (hay) "Hay una actualización disponible (${tag.removePrefix("v")})" else "Estás al día"
-        tvUpd.setTextColor(c(if (hay) R.color.moon_accent else R.color.moon_muted))
-    }
-
-    /** Consulta la última release en GitHub como mucho una vez por hora. */
-    private fun comprobarActualizacion() = Actualizaciones.consultar(prefs, ui) { mostrarUpd(it) }
 
     private fun alternar() {
         if (!conectado) {
@@ -298,7 +188,7 @@ class MainActivity : Activity() {
     private fun estado(txt: String, ok: Boolean) {
         tvEstado.text = txt
         tvEstado.setTextColor(c(if (ok) R.color.moon_ok else R.color.moon_bad))
-        marca(findViewById(R.id.chipVoz), ok); marca(sVoz, ok, if (ok) "Conectado" else "Sin conexión")
+        marca(findViewById(R.id.chipVoz), ok); ajustes.conexion(ok)
     }
 
     private fun pintar(resp: String?) {
@@ -314,7 +204,7 @@ class MainActivity : Activity() {
             if (j.has("auth")) {
                 conectado = false
                 estado("Token incorrecto", false)
-                vistaInicio("Token incorrecto", "Revísalo en la pestaña Sistema", false)
+                vistaInicio("Token incorrecto", "Revísalo en Sistema > Asistente y servidor", false)
                 actualizarBoton(); return
             }
             conectado = true
@@ -385,18 +275,20 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun pintarSistema(r: String?) {
-        if (r == null) { marca(sShz, false, "—"); marca(sMod, false, "—"); return }
-        try {
-            val j = JSONObject(r)
-            val s = j.getBoolean("shizuku")
-            marca(sShz, s, if (s) "Activo" else "Inactivo")
-            marca(sMod, true, j.getString("modelo"))
-        } catch (e: Exception) { /* sin datos: se conserva lo anterior */ }
-    }
-
     private fun actualizarBoton() {
         fab.setImageResource(if (escuchando) R.drawable.ic_stop else R.drawable.ic_mic)
         if (escuchando) { if (!animPulso.isStarted) animPulso.start() } else { animPulso.cancel(); pulso.alpha = 0f }
+    }
+
+    /** «Atrás» dentro de una subpantalla de Sistema vuelve a la lista de categorías. */
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun onBackPressed() {
+        if (tabActual == 2 && ajustes.atras()) return
+        super.onBackPressed()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 8) ajustes.alTenerPermisos()
     }
 }
