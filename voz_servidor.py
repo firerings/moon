@@ -373,6 +373,16 @@ def trabajador():
             acciones.log_evento({"tipo": "error", "donde": "procesar", "texto": t, "detalle": str(e)})
 
 
+def _recuperar_audio(fallos):
+    """Tras un fallo de captura: espera creciente y reinicia PulseAudio cada pocos fallos seguidos."""
+    if fallos % REINTENTOS_AUDIO == 0:
+        reiniciar_audio()
+    else:
+        parar.wait(1.0)
+    if fallos > REINTENTOS_AUDIO:
+        parar.wait(min(20.0, 2.0 * (fallos - REINTENTOS_AUDIO)))
+
+
 def escuchar(auto=False):
     rec = None
     p = None
@@ -397,13 +407,21 @@ def escuchar(auto=False):
                     cerrar_parec(p)
                     p = None
                     AUDIO["p"] = None
-                    if fallos > REINTENTOS_AUDIO:
-                        break
-                    if fallos == REINTENTOS_AUDIO:
-                        reiniciar_audio()
+                    _recuperar_audio(fallos)       # nunca se rinde: reintenta hasta que llegue /parar
                 continue
             if not data:                           # parec se cerro
-                break
+                if parar.is_set():
+                    break
+                fallos += 1
+                DIAG["audio_fallos"] += 1
+                DIAG["audio_ultimo_fallo"] = time.time()
+                acciones.log_evento({"tipo": "audio_sin_datos", "donde": "parec_cerrado", "intento": fallos})
+                cerrar_parec(p)
+                p = None
+                AUDIO["p"] = None
+                _recuperar_audio(fallos)
+                continue
+            fallos = 0                             # volvio el audio: los fallos no se acumulan
             sin = time.time()
             DIAG["audio_ultimo_ok"] = sin
             if CEREBRO.callando():
@@ -492,11 +510,15 @@ def _sesion_luna(rec):
                 break
             if rec.AcceptWaveform(data):
                 res = json.loads(rec.Result())
-                if _es_luna(res) and time.time() - LUNA["t"] > 3:
-                    LUNA["t"] = time.time()
-                    LUNA["n"] += 1
-                    acciones.log_evento({"tipo": "luna_oida"})
-                    return
+                if _es_luna(res):
+                    if time.time() - LUNA["t"] > 3:
+                        LUNA["t"] = time.time()
+                        LUNA["n"] += 1
+                        acciones.log_evento({"tipo": "luna_oida"})
+                        return
+                elif "luna" in (res.get("text") or "").split():
+                    acciones.log_evento({"tipo": "luna_descartada", "texto": res.get("text"),
+                                         "conf": [w.get("conf") for w in (res.get("result") or [])]})
     finally:
         cerrar_parec(p)
 

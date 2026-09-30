@@ -13,3 +13,4 @@ contactos.json
 contactos_alias.json
 contactos_uso.json
 ajustes.json
+*.bak_*

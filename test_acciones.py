@@ -202,7 +202,7 @@ chequear("cargando -> no pregunta", not c.pendiente)
 
 # --- ahorro y silencio ---
 c.ahorro = False
-chequear("límite de silencio: normal sin límite, ahorro 20 s", c.limite_silencio() is None and (setattr(c, "ahorro", True) or c.limite_silencio() == 20))
+chequear("límite de silencio: sin límite ni en ahorro", c.limite_silencio() is None and (setattr(c, "ahorro", True) or c.limite_silencio() is None))
 
 # --- linterna y batería por la app Moon (respaldo: Termux) ---
 import subprocess

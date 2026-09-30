@@ -67,7 +67,7 @@ class EdgeService : Service() {
             .addAction(Notification.Action.Builder(Icon.createWithResource(this, R.drawable.ic_mic), "Hablar", pIntAbrir).build())
             .build())
         franja = Franja(this, pr, h, { panel != null }, { abrir() })
-        luna = VigiaLuna(this, pr, h, { panel != null }, { abrir() })
+        luna = VigiaLuna(this, pr, h, { panel != null }, { saludarYAbrir() })
         auricular = BotonAuricular(this, pr) { saludarYAbrir() }
         franja.crear()
         Tarjeta.servicio(this, true)
