@@ -6,14 +6,12 @@ import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.role.RoleManager
 import android.content.Intent
-import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.view.Gravity
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 import android.widget.EditText
@@ -21,17 +19,7 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import android.app.Dialog
-import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
-import android.text.InputType
-import android.view.Window
-import android.view.WindowManager
-import android.widget.FrameLayout
-import android.widget.SeekBar
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -72,26 +60,20 @@ class MainActivity : Activity() {
     private fun c(id: Int) = getColor(id)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private fun tv(t: String, sp: Float, col: Int, bold: Boolean = false) = TextView(this).apply {
-        text = t; textSize = sp; setTextColor(col); if (bold) setTypeface(typeface, Typeface.BOLD)
-    }
+    // Piezas compartidas (UiKit) y hoja de detalle de Actividad; se crean al primer uso, ya con prefs listo.
+    private val kit by lazy { UiKit(this, prefs) }
+    private val detalle by lazy { DetalleActividad(this, kit, ui) { cargarActividad() } }
 
-    private fun tarjeta() = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL; setBackgroundResource(R.drawable.card_bg); setPadding(dp(16), dp(6), dp(16), dp(6))
-    }
-
-    private fun fila(t: String, accion: () -> Unit): Pair<LinearLayout, TextView> {
-        val r = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(12), 0, dp(12)); setOnClickListener { accion() } }
-        r.addView(tv(t, 15f, c(R.color.moon_text)), LinearLayout.LayoutParams(0, -2, 1f))
-        val ch = tv("", 12f, c(R.color.moon_muted)).apply { setBackgroundResource(R.drawable.chip_bg); setPadding(dp(12), dp(5), dp(12), dp(5)) }
-        r.addView(ch)
-        return r to ch
-    }
+    private fun tv(t: String, sp: Float, col: Int, bold: Boolean = false) = kit.tv(t, sp, col, bold)
+    private fun tarjeta() = kit.tarjeta()
+    private fun fila(t: String, accion: () -> Unit) = kit.fila(t, accion)
+    private fun filaSwitch(t: String, clave: String, def: Boolean = false, luego: () -> Unit = {}) = kit.filaSwitch(t, clave, def, luego)
+    private fun barra(t: String, clave: String, def: Int, min: Int, max: Int) = kit.barra(t, clave, def, min, max)
 
     private fun tarjetaAct(titulo: String, sub: String, color: Int, o: JSONObject) {
         val card = LinearLayout(this).apply {
             setBackgroundResource(R.drawable.card_bg); clipToOutline = true
-            setOnClickListener { mostrarDetalle(o) }
+            setOnClickListener { detalle.mostrar(o) }
         }
         card.addView(View(this).apply { setBackgroundColor(color) }, LinearLayout.LayoutParams(dp(3), -1))
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(12), dp(14), dp(12)) }
@@ -130,7 +112,11 @@ class MainActivity : Activity() {
             Thread { Api.call(this, "/limpiar", "POST") }.start()
             contAct.removeAllViews()
         }
+        construirSistema()
+    }
 
+    /** Pestaña Sistema: estado, token, franja del gesto, formas de activar y versión. */
+    private fun construirSistema() {
         // Pestaña Sistema
         val cont = findViewById<LinearLayout>(R.id.contSis)
         val t1 = tarjeta()
@@ -290,6 +276,16 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun mostrarUpd(tag: String) {
+        if (tag.isEmpty()) return
+        val hay = Actualizaciones.hayNueva(tag, verApp)
+        tvUpd.text = if (hay) "Hay una actualización disponible (${tag.removePrefix("v")})" else "Estás al día"
+        tvUpd.setTextColor(c(if (hay) R.color.moon_accent else R.color.moon_muted))
+    }
+
+    /** Consulta la última release en GitHub como mucho una vez por hora. */
+    private fun comprobarActualizacion() = Actualizaciones.consultar(prefs, ui) { mostrarUpd(it) }
+
     private fun alternar() {
         if (!conectado) {
             Toast.makeText(this, "Inicia el servidor en Termux: python3.9 voz_servidor.py", Toast.LENGTH_LONG).show()
@@ -397,231 +393,6 @@ class MainActivity : Activity() {
             marca(sShz, s, if (s) "Activo" else "Inactivo")
             marca(sMod, true, j.getString("modelo"))
         } catch (e: Exception) { /* sin datos: se conserva lo anterior */ }
-    }
-
-    private fun esMayor(a: List<Int>, b: List<Int>): Boolean {
-        for (i in 0 until maxOf(a.size, b.size)) {
-            val x = a.getOrElse(i) { 0 }; val y = b.getOrElse(i) { 0 }
-            if (x != y) return x > y
-        }
-        return false
-    }
-
-    private fun mostrarUpd(tag: String) {
-        if (tag.isEmpty()) return
-        val nueva = tag.removePrefix("v").split(".").map { it.toIntOrNull() ?: 0 }
-        val actual = verApp.split(".").map { it.toIntOrNull() ?: 0 }
-        val hay = esMayor(nueva, actual)
-        tvUpd.text = if (hay) "Hay una actualización disponible (${tag.removePrefix("v")})" else "Estás al día"
-        tvUpd.setTextColor(c(if (hay) R.color.moon_accent else R.color.moon_muted))
-    }
-
-    /** Consulta la última release en GitHub como mucho una vez por hora. */
-    private fun comprobarActualizacion() {
-        val ahora = System.currentTimeMillis()
-        if (ahora - prefs.getLong("upd_ts", 0) < 3600_000) { mostrarUpd(prefs.getString("upd_tag", "") ?: ""); return }
-        Thread {
-            val tag = try {
-                val con = URL("https://api.github.com/repos/Firerings/moon/releases/latest").openConnection() as HttpURLConnection
-                con.connectTimeout = 4000; con.readTimeout = 4000
-                con.setRequestProperty("Accept", "application/vnd.github+json")
-                JSONObject(con.inputStream.bufferedReader().use { it.readText() }).getString("tag_name")
-            } catch (e: Exception) { null }
-            ui.post {
-                if (tag != null) {
-                    prefs.edit().putLong("upd_ts", ahora).putString("upd_tag", tag).apply()
-                    mostrarUpd(tag)
-                }
-            }
-        }.start()
-    }
-
-    private fun filaSwitch(t: String, clave: String, def: Boolean = false, luego: () -> Unit = {}): LinearLayout {
-        var chip: TextView? = null
-        fun pinta() {
-            val on = prefs.getBoolean(clave, def)
-            chip?.text = if (on) "Sí" else "No"
-            chip?.setTextColor(c(if (on) R.color.moon_ok else R.color.moon_muted))
-        }
-        val (f, ch) = fila(t) { prefs.edit().putBoolean(clave, !prefs.getBoolean(clave, def)).apply(); pinta(); luego() }
-        chip = ch
-        pinta()
-        return f
-    }
-
-    /** Deslizador de tamaño: guarda en dp y la franja se redimensiona al instante. */
-    private fun barra(t: String, clave: String, def: Int, min: Int, max: Int): LinearLayout {
-        val cont = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(10), 0, dp(4)) }
-        val cab = tv("$t: ${prefs.getInt(clave, def).coerceIn(min, max)} dp", 14f, c(R.color.moon_text))
-        cont.addView(cab)
-        val sb = SeekBar(this)
-        sb.max = max - min
-        sb.progress = prefs.getInt(clave, def).coerceIn(min, max) - min
-        sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(s: SeekBar?, p: Int, deUsuario: Boolean) {
-                val v = p + min
-                cab.text = "$t: $v dp"
-                if (deUsuario) prefs.edit().putInt(clave, v).apply()
-            }
-            override fun onStartTrackingTouch(s: SeekBar?) {}
-            override fun onStopTrackingTouch(s: SeekBar?) {}
-        })
-        cont.addView(sb)
-        return cont
-    }
-
-    // ---------- detalle y correccion de una entrada de Actividad ----------
-    private fun boton(t: String, primario: Boolean, accion: () -> Unit) =
-        tv(t, 14f, c(if (primario) R.color.moon_bg else R.color.moon_text), true).apply {
-            setBackgroundResource(if (primario) R.drawable.pill_btn else R.drawable.chip_bg)
-            gravity = Gravity.CENTER
-            setPadding(dp(16), dp(10), dp(16), dp(10))
-            setOnClickListener { accion() }
-        }
-
-    private fun filaBotones(vararg b: TextView): LinearLayout {
-        val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(12), 0, 0) }
-        b.forEachIndexed { i, x ->
-            r.addView(x, LinearLayout.LayoutParams(0, -2, 1f).apply { if (i > 0) marginStart = dp(8) })
-        }
-        return r
-    }
-
-    private fun lineasDetalle(ev: JSONObject): String {
-        val l = mutableListOf<String>()
-        val via = when (val v = ev.optString("via")) {
-            "comando" -> "un comando fijo"
-            "regla" -> "la regla «abre / cierra …»"
-            "nlu" -> "el modelo de intenciones"
-            "respuesta" -> "tu respuesta a una pregunta"
-            "confirmado" -> "una confirmación"
-            "ninguna" -> "nada la entendió"
-            else -> v
-        }
-        if (via.isNotEmpty()) l.add("La decidió: $via")
-        if (ev.has("intent")) {
-            val cf = ev.optDouble("confianza", -1.0)
-            l.add("Intención: ${ev.optString("intent")}" + (if (cf >= 0) " (${Math.round(cf * 100)} % de confianza)" else ""))
-        }
-        val ent = ev.optJSONObject("entidades")
-        if (ent != null && ent.length() > 0) l.add("Entidades: $ent")
-        if (ev.has("accion")) l.add("Acción: ${ev.optString("accion")}")
-        val motivo = ev.optString("motivo")
-        if (ev.has("ok")) {
-            l.add(if (ev.optBoolean("ok")) "Resultado: hecho"
-                  else "Resultado: no se ejecutó" + (if (motivo.isNotEmpty()) " ($motivo)" else ""))
-        } else if (motivo.isNotEmpty()) l.add("Motivo: $motivo")
-        if (ev.has("ms")) l.add("Tardó ${ev.optInt("ms")} ms")
-        return if (l.isEmpty()) "Sin más detalle para esta entrada." else l.joinToString("\n")
-    }
-
-    private fun postJson(ruta: String, cuerpo: JSONObject, fin: (JSONObject?) -> Unit) {
-        Thread {
-            val r = Api.call(this, ruta, "POST", 3000, cuerpo.toString())
-            val j = try { JSONObject(r ?: "") } catch (e: Exception) { null }
-            ui.post { fin(if (j != null && j.optBoolean("ok")) j else null) }
-        }.start()
-    }
-
-    private fun mostrarDetalle(o: JSONObject) {
-        val id = o.optString("id")
-        if (id.isEmpty()) return
-        val oido = o.optString("texto")
-        val esOrden = o.optString("tipo") == "orden"
-        val dlg = Dialog(this)
-        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        val raiz = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setBackgroundResource(R.drawable.sheet_bg)
-            setPadding(dp(20), dp(18), dp(20), dp(18))
-        }
-        raiz.addView(tv(if (esOrden) o.optString("nombre", "Orden") else "«$oido»", 18f, c(R.color.moon_text), true))
-        if (esOrden && oido.isNotEmpty())
-            raiz.addView(tv("Oí: «$oido»", 14f, c(R.color.moon_muted)).apply { setPadding(0, dp(4), 0, 0) })
-        val fb = o.optString("fb")
-        val dijeAnt = o.optString("dije")
-        val estado = when (fb) {
-            "ok" -> "✓ Marcado como correcto"
-            "corr" -> "Corregido" + (if (dijeAnt.isNotEmpty()) ": dijiste «$dijeAnt»" else "") +
-                (if (o.optString("alias").isNotEmpty()) "\nAlias guardado: «${o.optString("alias")}» → ${o.optString("alias_nombre")}" else "")
-            else -> ""
-        }
-        if (estado.isNotEmpty())
-            raiz.addView(tv(estado, 14f, c(R.color.moon_ok)).apply { setPadding(0, dp(8), 0, 0) })
-        val info = tv("Cargando detalle…", 13f, c(R.color.moon_muted)).apply { setPadding(0, dp(10), 0, dp(2)) }
-        raiz.addView(info)
-        val zona = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        raiz.addView(zona)
-
-        Thread {
-            val r = Api.call(this, "/detalle?id=" + Uri.encode(id))
-            val ev = try { JSONObject(r ?: "").optJSONObject("evento") } catch (e: Exception) { null }
-            ui.post { info.text = if (ev != null) lineasDetalle(ev) else "Sin más detalle para esta entrada." }
-        }.start()
-
-        fun cuerpo(fb: String, dije: String = "") =
-            JSONObject().put("id", id).put("fb", fb).put("oido", oido).put("dije", dije)
-
-        fun ofrecerAlias(sug: JSONObject) {
-            zona.removeAllViews()
-            zona.addView(tv("¿Recordar que «${sug.optString("alias")}» significa ${sug.optString("nombre")}?", 15f, c(R.color.moon_text))
-                .apply { setPadding(0, dp(12), 0, 0) })
-            zona.addView(filaBotones(
-                boton("No", false) { dlg.dismiss() },
-                boton("Sí, recordar", true) {
-                    postJson("/alias", JSONObject().put("id", id).put("alias", sug.optString("alias"))
-                        .put("pkg", sug.optString("pkg")).put("nombre", sug.optString("nombre"))) { j ->
-                        Toast.makeText(this, if (j != null) "Alias guardado" else "No se pudo guardar el alias", Toast.LENGTH_SHORT).show()
-                        if (j != null) cargarActividad()
-                        dlg.dismiss()
-                    }
-                }))
-        }
-
-        fun formularioCorreccion() {
-            zona.removeAllViews()
-            val et = EditText(this).apply {
-                hint = if (esOrden) "Lo que dije fue… (ej. abre telegram)" else "Lo que dije fue…"
-                setTextColor(c(R.color.moon_text)); setHintTextColor(c(R.color.moon_muted)); textSize = 16f
-                isSingleLine = true; inputType = InputType.TYPE_CLASS_TEXT
-                if (fb == "corr" && dijeAnt.isNotEmpty()) { setText(dijeAnt); setSelection(dijeAnt.length) }
-            }
-            zona.addView(et, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
-            zona.addView(filaBotones(
-                boton("Cancelar", false) { dlg.dismiss() },
-                boton("Guardar", true) {
-                    val dije = et.text.toString().trim()
-                    if (dije.isEmpty()) { Toast.makeText(this, "Escribe lo que dijiste", Toast.LENGTH_SHORT).show(); return@boton }
-                    postJson("/corregir", cuerpo("corr", dije)) { j ->
-                        if (j == null) Toast.makeText(this, "No se pudo guardar (¿servidor?)", Toast.LENGTH_LONG).show()
-                        else {
-                            cargarActividad()
-                            val sug = j.optJSONObject("sugerencia")
-                            if (sug != null) ofrecerAlias(sug) else { Toast.makeText(this, "Corrección guardada", Toast.LENGTH_SHORT).show(); dlg.dismiss() }
-                        }
-                    }
-                }))
-            et.requestFocus()
-        }
-
-        zona.addView(filaBotones(
-            boton("✓ Estuvo bien", false) {
-                postJson("/corregir", cuerpo("ok")) { j ->
-                    Toast.makeText(this, if (j != null) "Anotado" else "No se pudo guardar (¿servidor?)", Toast.LENGTH_SHORT).show()
-                    if (j != null) cargarActividad()
-                    dlg.dismiss()
-                }
-            },
-            boton(if (fb == "corr") "Corregir de nuevo" else "Corregir", true) { formularioCorreccion() }))
-
-        val marco = FrameLayout(this).apply { setPadding(dp(10), 0, dp(10), dp(10)); addView(raiz) }
-        dlg.setContentView(marco)
-        dlg.window?.apply {
-            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            setLayout(-1, -2)
-            setGravity(Gravity.BOTTOM)
-            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        }
-        dlg.show()
     }
 
     private fun actualizarBoton() {
