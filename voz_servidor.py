@@ -1,4 +1,4 @@
-import json, subprocess, threading, os, re, secrets, time, queue
+import json, subprocess, threading, os, re, secrets, time, queue, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from vosk import Model, KaldiRecognizer, SetLogLevel
@@ -14,6 +14,7 @@ if not os.path.exists(TF):
     os.chmod(TF, 0o600)
 TOKEN = open(TF).read().strip()
 ACT = os.path.join(DIR, "logs", "actividad.jsonl")
+FB = os.path.join(DIR, "logs", "correcciones.jsonl")
 os.makedirs(os.path.dirname(ACT), exist_ok=True)
 
 
@@ -39,6 +40,7 @@ def orden_vista():
 def guardar(reg):
     """Añade un registro al historial de actividad (una línea JSON)."""
     reg["t"] = round(time.time(), 1)
+    reg.setdefault("id", secrets.token_hex(4))
     try:
         if os.path.exists(ACT) and os.path.getsize(ACT) > 100000:
             with open(ACT) as f:
@@ -51,19 +53,87 @@ def guardar(reg):
         pass
 
 
+def id_de(it):
+    """Id estable del registro; los que escribe un script bash no traen uno."""
+    return it.get("id") or "t%d" % int(float(it.get("t", 0)) * 10)
+
+
+def leer_correcciones(limite=800):
+    """{id: ultimo registro de feedback}."""
+    try:
+        with open(FB, encoding="utf-8") as f:
+            lineas = f.readlines()[-limite:]
+    except OSError:
+        return {}
+    out = {}
+    for ln in lineas:
+        try:
+            r = json.loads(ln)
+            out[r["id"]] = r
+        except (ValueError, KeyError):
+            pass
+    return out
+
+
 def leer_actividad(limite=40):
     try:
         with open(ACT) as f:
             lineas = f.readlines()[-limite:]
     except OSError:
         return []
+    fb = leer_correcciones()
     out = []
     for ln in lineas:
         try:
-            out.append(json.loads(ln))
+            it = json.loads(ln)
         except ValueError:
-            pass
+            continue
+        it["id"] = id_de(it)
+        r = fb.get(it["id"])
+        if r:
+            it["fb"] = r.get("fb")
+            if r.get("dije"):
+                it["dije"] = r["dije"]
+        out.append(it)
     return out
+
+
+def _epoch_evento(ev, dia):
+    if "t" in ev:
+        return float(ev["t"])
+    try:
+        h = datetime.datetime.strptime(ev.get("ts", ""), "%H:%M:%S").time()
+        return datetime.datetime.combine(dia, h).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def buscar_evento(it):
+    """Evento de la frase en el log diario (intencion, confianza, via, resultado)."""
+    t = float(it.get("t", 0))
+    dia = datetime.datetime.fromtimestamp(t).date()
+    ruta = os.path.join(acciones.LOGDIR, "moon_%s.jsonl" % dia.strftime("%Y-%m-%d"))
+    try:
+        with open(ruta, encoding="utf-8") as f:
+            lineas = f.readlines()[-600:]
+    except OSError:
+        return None
+    fid, texto = it.get("frase_id"), it.get("texto", "")
+    mejor = None
+    for ln in lineas:
+        try:
+            ev = json.loads(ln)
+        except ValueError:
+            continue
+        if ev.get("tipo") != "frase":
+            continue
+        if fid and ev.get("id") == fid:
+            return ev
+        if not fid and texto and ev.get("texto") == texto:
+            d = abs(_epoch_evento(ev, dia) - t)
+            if d <= 30 and (mejor is None or d < mejor[0]):
+                mejor = (d, ev)
+    return mejor[1] if mejor else None
 
 
 def marca_actividad():
@@ -265,10 +335,24 @@ class H(BaseHTTPRequestHandler):
                          "sid": ACC["sid"], "acciones": acciones_pendientes()})
         elif u.path == "/actividad":
             self._j({"items": leer_actividad()})
+        elif u.path == "/detalle":
+            i = parse_qs(u.query).get("id", [""])[0]
+            it = next((x for x in leer_actividad(200) if x["id"] == i), None)
+            self._j({"evento": buscar_evento(it) if it else None})
         elif u.path == "/sistema":
             self._j({"shizuku": shizuku_activo(), "modelo": modelo_corto()})
         else:
             self._j({"error": "no existe"}, 404)
+
+    def _cuerpo_json(self, maximo=4000):
+        n = int(self.headers.get("Content-Length", 0) or 0)
+        if n <= 0 or n > maximo:
+            return None
+        try:
+            d = json.loads(self.rfile.read(n))
+            return d if isinstance(d, dict) else None
+        except ValueError:
+            return None
 
     def do_POST(self):
         if not self._auth():
@@ -298,6 +382,34 @@ class H(BaseHTTPRequestHandler):
             marcar_ack(i)
             CEREBRO.resultado_app(i, ok)
             self._j({"ok": True})
+        elif u.path == "/corregir":
+            d = self._cuerpo_json()
+            try:
+                i, fb = str(d["id"])[:40], d["fb"]
+                oido, dije = str(d.get("oido", ""))[:300], str(d.get("dije", "")).strip()[:300]
+            except (TypeError, KeyError):
+                return self._j({"error": "formato"}, 400)
+            if fb not in ("ok", "corr") or not i or (fb == "corr" and not dije):
+                return self._j({"error": "parametros"}, 400)
+            reg = {"id": i, "fb": fb, "oido": oido, "dije": dije, "t": round(time.time(), 1)}
+            try:
+                with open(FB, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(reg, ensure_ascii=False) + "\n")
+            except OSError:
+                return self._j({"error": "disco"}, 500)
+            acciones.log_evento({"tipo": "correccion", "frase_id": i, "fb": fb, "oido": oido, "dije": dije})
+            sug = CEREBRO.sugerir_alias(oido, dije) if fb == "corr" else None
+            self._j({"ok": True, "sugerencia": sug})
+        elif u.path == "/alias":
+            d = self._cuerpo_json()
+            try:
+                alias, pkg = str(d["alias"]), str(d["pkg"])
+            except (TypeError, KeyError):
+                return self._j({"error": "formato"}, 400)
+            ok = CEREBRO.guardar_alias(alias, pkg)
+            if ok:
+                acciones.log_evento({"tipo": "alias_guardado", "alias": alias, "pkg": pkg})
+            self._j({"ok": ok})
         elif self.path == "/parar":
             parar.set()
             self._j({"ok": True})

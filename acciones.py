@@ -45,7 +45,7 @@ def norm(t):
 def log_evento(reg):
     """Una linea JSON por evento en Download/MoonLogs/moon_AAAA-MM-DD.jsonl"""
     ahora = datetime.datetime.now()
-    reg = {"ts": ahora.strftime("%H:%M:%S"), **reg}
+    reg = {"ts": ahora.strftime("%H:%M:%S"), "t": round(ahora.timestamp(), 1), **reg}
     try:
         with _log_lock:
             os.makedirs(LOGDIR, exist_ok=True)
@@ -255,7 +255,7 @@ class Cerebro:
         if not tn:
             return
         t0 = time.time()
-        reg = {"tipo": "frase", "texto": texto, "norm": tn}
+        reg = {"id": os.urandom(4).hex(), "tipo": "frase", "texto": texto, "norm": tn}
         with self._lock:
             if self.pendiente:
                 return self._responder_pendiente(tn, reg)
@@ -359,7 +359,9 @@ class Cerebro:
         reg.update(accion=accion, args=args, ms=int((time.time() - t0) * 1000))
         log_evento(reg)
         if accion != "reiniciar":
-            self.env["ui"]({"tipo": "orden", "nombre": NOMBRES.get(accion, accion), "via": "voz"})
+            self.env["ui"]({"tipo": "orden", "nombre": NOMBRES.get(accion, accion), "via": "voz",
+                            "texto": reg.get("texto", ""), "frase_id": reg.get("id", ""),
+                            "dur_ms": reg.get("ms", 0)})
         self.hablar(resp)
         return resp
 
@@ -503,6 +505,51 @@ class Cerebro:
         except Exception:
             pass
         return alias
+
+    def _clave_app(self, texto):
+        """Parte 'app' de una frase, con el mismo formato que usa resolver_app para los alias."""
+        tn = norm(texto)
+        r = self._regla_app(tn)
+        base = r[1] if r else tn
+        return " ".join(w for w in norm(base).split() if w not in RELLENO)
+
+    def sugerir_alias(self, oido, dije):
+        """Si 'dije' es una app instalada y 'oido' no lleva a ella, propone el alias oido -> app."""
+        pkgs = self.apps_instaladas()
+        if not pkgs:
+            return None
+        real = self.resolver_app(self._clave_app(dije), pkgs)
+        if not real or real["score"] < 0.9:
+            return None
+        clave = self._clave_app(oido)
+        if not clave or len(clave) > 60:
+            return None
+        previo = self.resolver_app(clave, pkgs)
+        if previo and previo["pkg"] == real["pkg"] and previo["score"] >= 0.9:
+            return None
+        return {"alias": clave, "pkg": real["pkg"], "nombre": real["nombre"]}
+
+    def guardar_alias(self, alias, pkg):
+        """Guarda alias -> paquete en apps_alias.json (se lee en cada busqueda: vale al instante)."""
+        clave = " ".join(w for w in norm(alias).split() if w not in RELLENO)
+        if not clave or len(clave) > 60 or pkg not in set(self.apps_instaladas()):
+            return False
+        ruta = os.path.join(DIR, "apps_alias.json")
+        try:
+            with open(ruta, encoding="utf-8") as f:
+                datos = json.load(f)
+        except Exception:
+            datos = {}
+        actual = datos.get(clave, [])
+        actual = [actual] if isinstance(actual, str) else list(actual)
+        if pkg not in actual:
+            actual.insert(0, pkg)
+        datos[clave] = actual
+        tmp = ruta + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(datos, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, ruta)
+        return True
 
     def resolver_app(self, texto, pkgs):
         """Orden: etiqueta exacta (catalogo de la app) > alias > etiqueta parecida > nombre del paquete."""

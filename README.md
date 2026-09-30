@@ -72,3 +72,17 @@ Franja fina en el borde inferior izquierdo: tocar y deslizar a la derecha abre e
 - `moon.sh` arranca el servidor (idempotente). La app Moon lo llama sola (RUN_COMMAND) cuando no encuentra el servidor;
   requiere `allow-external-apps=true` en `~/.termux/termux.properties` y el permiso «Ejecutar comandos en Termux» para Moon.
 - `python3 test_acciones.py` prueba el cerebro con Shizuku, voz y app simulados. `pt_a_npz.py` convierte un `.pt` nuevo a `.npz` sin PyTorch.
+
+
+## Correccion en Actividad y franja configurable
+
+**Actividad.** Tocar una tarjeta abre una hoja con lo que decidio Moon (via, intencion y confianza, accion,
+resultado, ms). Botones: "Estuvo bien" y "Corregir" (escribes lo que dijiste). Si lo corregido es una app
+instalada que lo oido no alcanzaba, Moon propone guardar el alias y lo escribe en `apps_alias.json` (vale al instante).
+- Servidor: `GET /detalle?id=`, `POST /corregir` `{id, fb: ok|corr, oido, dije}`, `POST /alias` `{alias, pkg}`.
+- Datos: `logs/correcciones.jsonl` (una linea por feedback) y eventos `correccion` / `alias_guardado` en `MoonLogs`.
+- Cada frase lleva `id` y cada evento `t` (epoch); las ordenes de la tarjeta guardan `texto`, `frase_id` y `dur_ms`.
+
+**Franja.** Sistema > Franja del gesto: mostrar, desbloquear para mover (arrastrar), ocultar, alto y ancho con
+deslizadores (dp) y restablecer. Prefs `fr_visible`, `fr_mover`, `fr_oculto`, `fr_alto`, `fr_ancho`, `fr_x`, `fr_sube`;
+se aplican al instante. La notificacion trae el boton "Hablar" (abre el overlay aunque la franja este oculta).
