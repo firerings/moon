@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tarjeta Sí/No flotante: la dibuja Tarjeta.kt en su propia ventana, encima de cualquier app (sin fondo oscuro). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:background="@drawable/dialog_card" android:orientation="vertical"
+    android:elevation="12dp" android:padding="22dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+        <com.exclusivo.moon.MoonView android:layout_width="28dp" android:layout_height="28dp" />
+        <TextView android:id="@+id/tkTitulo" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:layout_marginStart="10dp" android:text="Confirmar llamada" android:textColor="@color/moon_muted"
+            android:textSize="13sp" android:textStyle="bold" android:letterSpacing="0.06" />
+        <TextView android:id="@+id/tkOpcion" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:background="@drawable/chip_bg" android:paddingHorizontal="10dp" android:paddingVertical="4dp"
+            android:textColor="@color/moon_accent" android:textSize="12sp" android:visibility="gone" />
+    </LinearLayout>
+    <TextView android:id="@+id/tkNombre" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="20dp" android:gravity="center" android:textColor="@color/moon_text"
+        android:textSize="26sp" android:textStyle="bold" />
+    <TextView android:id="@+id/tkNumero" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="6dp" android:gravity="center" android:textColor="@color/moon_accent"
+        android:textSize="19sp" android:letterSpacing="0.04" />
+    <LinearLayout android:id="@+id/tkLista" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="10dp" android:orientation="vertical" android:visibility="gone" />
+    <ProgressBar android:id="@+id/tkBarra" style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent" android:layout_height="5dp" android:layout_marginTop="16dp"
+        android:max="1000" android:progress="1000" android:progressDrawable="@drawable/pg_barra" />
+    <LinearLayout android:id="@+id/tkBotones" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp">
+        <TextView android:id="@+id/tkNo" android:layout_width="0dp" android:layout_height="58dp" android:layout_weight="1"
+            android:layout_marginEnd="6dp" android:background="@drawable/btn_no" android:gravity="center"
+            android:text="✕  No" android:textColor="@color/moon_bad" android:textSize="19sp" android:textStyle="bold" />
+        <TextView android:id="@+id/tkSi" android:layout_width="0dp" android:layout_height="58dp" android:layout_weight="1"
+            android:layout_marginStart="6dp" android:background="@drawable/btn_si" android:gravity="center"
+            android:text="✓  Sí" android:textColor="#06281B" android:textSize="19sp" android:textStyle="bold" />
+    </LinearLayout>
+    <TextView android:id="@+id/tkNadie" android:layout_width="match_parent" android:layout_height="52dp"
+        android:layout_marginTop="12dp" android:background="@drawable/btn_no" android:gravity="center"
+        android:text="No llamar a nadie" android:textColor="@color/moon_bad" android:textSize="16sp" android:textStyle="bold"
+        android:visibility="gone" />
+    <TextView android:id="@+id/tkHint" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+        android:gravity="center" android:text="También puedes decir «sí» o «no»"
+        android:textColor="@color/moon_muted" android:textSize="12sp" />
+</LinearLayout>

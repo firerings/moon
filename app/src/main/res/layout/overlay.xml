@@ -30,41 +30,4 @@
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Ejecutado con Shizuku, sin root" android:textColor="@color/moon_muted" android:textSize="13sp" />
         </LinearLayout>
     </LinearLayout>
-    <!-- Pregunta Sí/No (confirmar llamada, modo ahorro...). La dibuja OverlayPanel cuando /estado trae "pregunta". -->
-    <LinearLayout
-        android:id="@+id/ovPregunta"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_gravity="center" android:layout_marginHorizontal="24dp"
-        android:background="@drawable/dialog_card" android:orientation="vertical"
-        android:clickable="true" android:elevation="12dp" android:padding="22dp" android:visibility="gone">
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
-            <com.exclusivo.moon.MoonView android:layout_width="28dp" android:layout_height="28dp" />
-            <TextView android:id="@+id/pgTitulo" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                android:layout_marginStart="10dp" android:text="Confirmar llamada" android:textColor="@color/moon_muted"
-                android:textSize="13sp" android:textStyle="bold" android:letterSpacing="0.06" />
-            <TextView android:id="@+id/pgOpcion" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:background="@drawable/chip_bg" android:paddingHorizontal="10dp" android:paddingVertical="4dp"
-                android:textColor="@color/moon_accent" android:textSize="12sp" android:visibility="gone" />
-        </LinearLayout>
-        <TextView android:id="@+id/pgNombre" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="20dp" android:gravity="center" android:textColor="@color/moon_text"
-            android:textSize="26sp" android:textStyle="bold" />
-        <TextView android:id="@+id/pgNumero" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="6dp" android:gravity="center" android:textColor="@color/moon_accent"
-            android:textSize="19sp" android:letterSpacing="0.04" />
-        <ProgressBar android:id="@+id/pgBarra" style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent" android:layout_height="5dp" android:layout_marginTop="20dp"
-            android:max="1000" android:progress="1000" android:progressDrawable="@drawable/pg_barra" />
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp">
-            <TextView android:id="@+id/pgNo" android:layout_width="0dp" android:layout_height="58dp" android:layout_weight="1"
-                android:layout_marginEnd="6dp" android:background="@drawable/btn_no" android:gravity="center"
-                android:text="✕  No" android:textColor="@color/moon_bad" android:textSize="19sp" android:textStyle="bold" />
-            <TextView android:id="@+id/pgSi" android:layout_width="0dp" android:layout_height="58dp" android:layout_weight="1"
-                android:layout_marginStart="6dp" android:background="@drawable/btn_si" android:gravity="center"
-                android:text="✓  Sí" android:textColor="#06281B" android:textSize="19sp" android:textStyle="bold" />
-        </LinearLayout>
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
-            android:gravity="center" android:text="También puedes decir «sí» o «no»"
-            android:textColor="@color/moon_muted" android:textSize="12sp" />
-    </LinearLayout>
 </FrameLayout>

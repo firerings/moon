@@ -45,6 +45,7 @@ class EdgeService : Service() {
     private val escucha = SharedPreferences.OnSharedPreferenceChangeListener { _, k ->
         if (k != null && (k.startsWith("fr_") || k == "gesto")) franja.aplicar()
         if (k == "luna" || k == "auricular") extras()
+        if (k == "tarjeta_flotante") Tarjeta.arrancar(this)
     }
 
     override fun onBind(i: Intent?): IBinder? = null
@@ -69,6 +70,7 @@ class EdgeService : Service() {
         luna = VigiaLuna(this, pr, h, { panel != null }, { abrir() })
         auricular = BotonAuricular(this, pr) { saludarYAbrir() }
         franja.crear()
+        Tarjeta.servicio(this, true)
         Voz.calentar(this)
         pr.registerOnSharedPreferenceChangeListener(escucha)
         franja.aplicar()
@@ -127,6 +129,7 @@ class EdgeService : Service() {
     override fun onDestroy() {
         pr.unregisterOnSharedPreferenceChangeListener(escucha)
         auricular.liberar()
+        Tarjeta.servicio(this, false)
         cerrar()
         franja.quitar()
         super.onDestroy()

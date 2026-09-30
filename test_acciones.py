@@ -298,7 +298,8 @@ v = c.vista_pregunta()
 chequear("tarjeta: la pregunta trae texto, contacto y opción k de n",
          bool(v) and v["texto"] == "¿Llamo a Daniel Lopez?" and v["extra"]["tipo"] == "llamar" and v["extra"]["cid"] == "1"
          and v["extra"]["k"] == 1 and v["extra"]["n"] >= 2 and 0 < v["restante"] <= 5)
-chequear("tarjeta: el número no viaja en la pregunta", all(k in ("tipo", "cid", "nombre", "k", "n") for k in v["extra"]))
+chequear("tarjeta: el número no viaja en la pregunta", all(k in ("tipo", "cid", "nombre", "k", "n", "opciones") for k in v["extra"])
+         and all(set(o) == {"cid", "nombre"} for o in v["extra"]["opciones"]))
 chequear("tarjeta: un id de otra pregunta se rechaza", not c.responder_toque("si", "zzzz") and c.pendiente is not None)
 chequear("tarjeta: 'No' tocado pasa al siguiente parecido",
          c.responder_toque("no", v["id"]) and esperar(lambda: (c.vista_pregunta() or {}).get("texto") == "¿Llamo a Daniela Perez?"))
@@ -308,6 +309,31 @@ chequear("tarjeta: 'Sí' tocado marca por id y cierra la pregunta",
          c.responder_toque("si", v2["id"]) and esperar(lambda: ACC["pedidas"] and ACC["pedidas"][-1]["cid"] == "2")
          and esperar(lambda: c.pendiente is None and not S["esc"]))
 chequear("tarjeta: respondió por voz y luego toca -> se ignora", (dice("llama a daniel") and dice("si")) and not c.responder_toque("si"))
+
+# ---- tarjeta con lista de opciones: Sí/No por fila y «No llamar a nadie» ----
+ACC["pedidas"].clear()
+dice("llama a daniel")
+v = c.vista_pregunta()
+ops = v["extra"]["opciones"]
+chequear("lista: trae los parecidos desde el actual, primero el de la pregunta",
+         len(ops) >= 2 and ops[0]["cid"] == v["extra"]["cid"] and len(ops) <= 4)
+chequear("lista: Sí en un cid que no es opción se rechaza", not c.responder_toque("si", v["id"], "zzz") and c.pendiente is not None)
+chequear("lista: Sí en la fila 2 llama a ese contacto y cierra",
+         c.responder_toque("si", v["id"], ops[1]["cid"]) and esperar(lambda: ACC["pedidas"] and ACC["pedidas"][-1]["cid"] == ops[1]["cid"])
+         and esperar(lambda: c.pendiente is None and not S["esc"]))
+ACC["pedidas"].clear()
+dice("llama a daniel")
+v = c.vista_pregunta()
+ops = v["extra"]["opciones"]
+chequear("lista: ✕ en una fila la quita y la pregunta se rearma sin ella",
+         c.responder_toque("no", v["id"], ops[0]["cid"])
+         and esperar(lambda: (c.vista_pregunta() or {}).get("id") not in (None, v["id"]))
+         and ops[0]["cid"] not in [o["cid"] for o in c.vista_pregunta()["extra"]["opciones"]]
+         and not ACC["pedidas"])
+v = c.vista_pregunta()
+chequear("lista: «No llamar a nadie» cierra todo sin llamar ni proponer el siguiente",
+         c.responder_toque("nadie", v["id"]) and esperar(lambda: c.pendiente is None and not S["esc"]) and not ACC["pedidas"])
+
 cfg.ESPERA_RESPUESTA = 0.4
 ACC["activa"] = False
 

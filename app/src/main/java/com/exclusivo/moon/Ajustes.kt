@@ -16,6 +16,9 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Pestaña Sistema: una lista de categorías y una subpantalla por categoría (asistente y servidor, gesto,
@@ -54,7 +57,10 @@ class Ajustes(
     private var pidiendo = false
     private var confirmar = true
     private var chipConf: TextView? = null
-    private var tvUpd: TextView? = null
+    private var semApp: UiKit.Semaforo? = null
+    private var semSrv: UiKit.Semaforo? = null
+    private var detApp: TextView? = null
+    private var detSrv: TextView? = null
     private val filas = HashMap<String, UiKit.Semaforo>()
     private val verApp: String by lazy {
         try { act.packageManager.getPackageInfo(act.packageName, 0).versionName ?: "?" } catch (e: Exception) { "?" }
@@ -78,7 +84,7 @@ class Ajustes(
         pantalla = p
         filas.clear()
         chipConf = null
-        tvUpd = null
+        semApp = null; semSrv = null; detApp = null; detSrv = null
         ultDiag = 0
         cont.removeAllViews()
         (cont.parent as? View)?.scrollTo(0, 0)
@@ -144,6 +150,12 @@ class Ajustes(
             }
         })
         agregar(t, 0)
+        val tp = kit.tarjeta()
+        tp.addView(titulo("Preguntas de Moon"))
+        tp.addView(kit.filaSwitch("Tarjeta sobre otras apps", "tarjeta_flotante", true))
+        tp.addView(nota("Cuando Moon pregunta algo (llamar, modo ahorro...) sale una tarjeta encima de lo que estés usando, sin cerrar nada. " +
+            "Necesita el permiso de superposición. Apagada, solo sale con el overlay de escucha abierto y la app no consulta en segundo plano.", 0))
+        agregar(tp)
     }
 
     private fun gesto() {
@@ -246,28 +258,102 @@ class Ajustes(
     }
 
     private fun acerca() {
-        val t = LinearLayout(act).apply {
-            orientation = LinearLayout.VERTICAL; setBackgroundResource(R.drawable.card_bg)
-            setPadding(kit.dp(16), kit.dp(14), kit.dp(16), kit.dp(16))
-        }
-        t.addView(kit.tv("Versión $verApp", 15f, kit.c(R.color.moon_text), true))
-        val u = kit.tv("Las nuevas versiones se publican en GitHub", 13f, kit.c(R.color.moon_muted))
-        tvUpd = u
-        t.addView(u)
-        t.addView(kit.tv("Actualizar", 13f, kit.c(R.color.moon_bg), true).apply {
-            setBackgroundResource(R.drawable.pill_btn); setPadding(kit.dp(18), kit.dp(8), kit.dp(18), kit.dp(8))
-            setOnClickListener { act.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Firerings/moon/releases/latest"))) }
-        }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = kit.dp(12) })
+        val t = kit.tarjeta()
+        t.addView(kit.tv("Versión $verApp", 15f, kit.c(R.color.moon_text), true).apply { setPadding(0, kit.dp(10), 0, kit.dp(2)) })
+        val sApp = kit.semaforo("Aplicación")
+        val dApp = kit.tv("", 12f, kit.c(R.color.moon_muted))
+        val sSrv = kit.semaforo("Servidor de Termux")
+        val dSrv = kit.tv("", 12f, kit.c(R.color.moon_muted))
+        semApp = sApp; detApp = dApp; semSrv = sSrv; detSrv = dSrv
+        t.addView(sApp.fila); t.addView(dApp)
+        t.addView(sSrv.fila); t.addView(dSrv)
+        t.addView(kit.filaBotones(
+            kit.boton("Buscar actualizaciones", true) { buscar(true) },
+            kit.boton("Descargar APK", false) {
+                act.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Firerings/moon/releases/latest")))
+            }
+        ))
+        t.addView(nota("La app se actualiza desde las releases de GitHub. El servidor se actualiza con git pull en Termux " +
+            "(solo baja lo que cambió). Buscar comprueba las dos cosas ahora mismo.", 10))
         agregar(t, 0)
-        Actualizaciones.consultar(prefs, ui) { mostrarUpd(it) }
+        buscar(false)
     }
 
-    private fun mostrarUpd(tag: String) {
-        val v = tvUpd ?: return
-        if (tag.isEmpty()) return
+    private fun hora(ms: Long, conFecha: Boolean = false) =
+        SimpleDateFormat(if (conFecha) "dd/MM HH:mm" else "HH:mm", Locale.getDefault()).format(Date(ms))
+
+    /** [forzar] = botón: pregunta a GitHub y al git del servidor ahora. Al entrar solo usa lo guardado y /version (sin red). */
+    private fun buscar(forzar: Boolean) {
+        semApp?.poner(0, "Comprobando…"); semSrv?.poner(0, "Comprobando…")
+        detApp?.text = ""; detSrv?.text = ""
+        Actualizaciones.consultar(prefs, ui, forzar) { pintarApp(it) }
+        val app = act.applicationContext
+        Thread {
+            val v = Api.call(app, "/version")
+            // Un servidor anterior a /version da 404 (llega como null): /sistema distingue «antiguo» de «apagado».
+            val vivo = v != null || Api.call(app, "/sistema") != null
+            val g = if (forzar && v != null && !v.contains("auth")) Api.call(app, "/git/comprobar", "POST", 30000) else null
+            ui.post { pintarServidor(v, vivo, forzar, g) }
+        }.start()
+    }
+
+    private fun pintarApp(r: Actualizaciones.Resultado) {
+        val s = semApp ?: return
+        val d = detApp ?: return
+        val tag = r.tag
+        if (tag == null) {
+            val previa = prefs.getLong("upd_ts", 0)
+            s.poner(0, "No pude comprobar")
+            d.text = (r.motivo ?: "") + " · intento a las " + hora(r.hora) +
+                (if (previa > 0) " · la última vez que sí pude fue " + hora(previa, true) else "")
+            return
+        }
         val hay = Actualizaciones.hayNueva(tag, verApp)
-        v.text = if (hay) "Hay una actualización disponible (${tag.removePrefix("v")})" else "Estás al día"
-        v.setTextColor(kit.c(if (hay) R.color.moon_accent else R.color.moon_muted))
+        s.poner(if (hay) 2 else 1, if (hay) "Nueva ${tag.removePrefix("v")}" else "Al día")
+        d.text = if (hay) "Hay una versión más nueva que la $verApp · comprobado a las ${hora(r.hora)}"
+                 else "Tienes la última versión publicada · comprobado a las ${hora(r.hora)}"
+    }
+
+    private fun pintarServidor(v: String?, vivo: Boolean, forzado: Boolean, g: String?) {
+        val s = semSrv ?: return
+        val d = detSrv ?: return
+        if (v != null && v.contains("auth")) { s.poner(3, "Token incorrecto"); d.text = "Revísalo en Asistente y servidor"; return }
+        if (!vivo) { s.poner(0, "Sin conexión"); d.text = "Moon no llega al servidor. ¿Está encendido en Termux?"; return }
+        val j = try { JSONObject(v ?: "") } catch (e: Exception) { null }
+        if (j == null || !j.has("servidor")) {
+            s.poner(2, "Antiguo")
+            d.text = "Este servidor no informa su versión. En Termux: git pull y reinícialo."
+            return
+        }
+        val srvProt = j.optInt("protocolo", 0)
+        val info = "Servidor ${j.optString("servidor")}" + (if (j.optString("commit").isNotEmpty()) " · ${j.optString("commit")}" else "")
+        if (Actualizaciones.PROTOCOLO_APP < j.optInt("min_app", 0)) {
+            s.poner(3, "Actualiza la app"); d.text = "$info · esta app es más vieja de lo que el servidor acepta. Usa Descargar APK."; return
+        }
+        if (srvProt < Actualizaciones.MIN_SERVIDOR) {
+            s.poner(3, "Actualiza el servidor"); d.text = "$info · es más viejo de lo que esta app necesita. En Termux: git pull y reinícialo."; return
+        }
+        if (!forzado) { s.poner(1, "Compatible"); d.text = "$info · compatible con la app. Pulsa Buscar para ver si hay cambios por bajar."; return }
+        val r = try { JSONObject(g ?: "") } catch (e: Exception) { null }
+        val estado = r?.optString("estado") ?: ""
+        if (r == null || estado != "ok") {
+            s.poner(0, "No pude comprobar")
+            d.text = "$info · " + when (estado) {
+                "sin_git" -> "la carpeta del servidor no es un repositorio git."
+                "sin_remoto" -> "el repositorio no tiene remoto configurado."
+                "fallo" -> "git no pudo consultar GitHub (¿sin conexión?)."
+                else -> "el servidor tardó demasiado en consultar git."
+            }
+            return
+        }
+        val atras = r.optInt("atras", 0)
+        if (atras == 0) { s.poner(1, "Al día"); d.text = "$info · sin cambios por bajar · comprobado a las ${hora(System.currentTimeMillis())}"; return }
+        val cambios = r.optJSONArray("cambios")
+        val lista = StringBuilder()
+        if (cambios != null) for (i in 0 until cambios.length()) lista.append("\n• ").append(cambios.optString(i))
+        s.poner(2, if (atras == 1) "1 cambio" else "$atras cambios")
+        d.text = "$info · hay $atras por bajar con git pull en Termux (después reinicia el servidor):$lista" +
+            (if (r.optBoolean("sucio", false)) "\nTienes cambios locales sin guardar: haz commit o git stash antes del pull." else "")
     }
 
     // ---------- acciones ----------

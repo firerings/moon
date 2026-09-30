@@ -52,7 +52,7 @@ Franja fina en el borde inferior izquierdo. Qué la activa (toque, doble toque, 
 ### App
 - Inicio: estado, texto en vivo y onda mientras escucha (igual que el overlay)
 - Actividad: historial persistente (se guarda en el móvil, sobrevive a cerrar la app)
-- Sistema: asistente, servidor, Shizuku, superposición, modelo, gesto y versión (consulta la última release en GitHub, máx. una vez por hora)
+- Sistema: asistente, servidor, Shizuku, superposición, modelo, gesto y versión (dos semáforos: APK contra la última release de GitHub y servidor de Termux; botón «Buscar actualizaciones»)
 
 ## Pendiente
 - Verificar en el móvil el botón de hablar de la app. Causa hallada: el ScrollView de Actividad seguía visible encima de Inicio y se comía los toques del botón (corregido, falta confirmar). Si el texto en vivo de Inicio no aparece, el problema es el micrófono de Termux; probar con `curl -s -H "X-Moon-Token: $(cat .token)" 127.0.0.1:8765/estado` mientras se habla
@@ -130,8 +130,31 @@ activar**, **Contactos y llamadas**, **Diagnóstico** y **Versión y actualizaci
 - **Abrir app con nombre dudoso:** si «abre X» no llega al umbral (0,75), proponer la app más parecida por voz («No encuentro Beth. ¿Quieres abrir 1xBet?»); si dice sí, guardar el alias solo.
 - **Medir el consumo de «Luna»:** batería gastada en unas horas con «Luna» encendida frente a apagada (Redmi 10A).
 
-## Tarjeta Sí/No en pantalla
-Cuando Moon hace una pregunta de sí/no («¿Llamo a la Pura?», modo ahorro...) el overlay muestra una tarjeta centrada: nombre del contacto,
-su **número** (lo lee la app de tus contactos; el servidor solo conoce id y nombre, y por voz tampoco se dice), «Opción 1 de 3» si hay varios
-parecidos, barra con el tiempo que queda y botones ✓ Sí / ✕ No. Se puede contestar tocando o por voz; al contestar de una forma la tarjeta
-se cierra. Código: `cerebro/dialogo.py` (`vista_pregunta`, `responder_toque`), `OverlayPanel` en `Assistant.kt` y `overlay.xml`.
+## Tarjeta Sí/No flotante
+Cuando Moon hace una pregunta de sí/no («¿Llamo a la Pura?», modo ahorro...) sale una tarjeta en **su propia ventana**, encima de cualquier app
+(Moon incluida), sin fondo oscuro y sin cerrar nada detrás. También sale para las preguntas que Moon hace solo, como la de la batería.
+- **Una opción:** nombre, **número** (lo lee la app de tus contactos; el servidor solo conoce id y nombre), barra con el tiempo que queda, ✓ Sí y ✕ No.
+- **Varias opciones** (hasta 4 parecidos): lista con ✓ y ✕ por fila y debajo «No llamar a nadie». ✕ en una fila quita solo esa opción.
+  Por voz sigue igual: «sí» llama al primero, «no» pasa al siguiente.
+- Al salir la tarjeta el overlay de escucha se oculta; con ✓ vuelve a verse para ejecutar la orden; con «No» a todo (o ✕ en la última fila) se oculta todo.
+- Ajuste **Tarjeta sobre otras apps** (Sistema > Asistente y servidor, por defecto sí). Activo, la app consulta `GET /pregunta` una vez por segundo
+  mientras viva el servicio de la franja (no cuenta como «app mirando» para el servidor). Apagado, solo sale con el overlay de escucha abierto.
+  Necesita el permiso de superposición.
+- Código: `Tarjeta.kt` y `tarjeta.xml` (ventana y sondeo), `cerebro/dialogo.py` (`vista_pregunta`, `responder_toque(r, id, cid)`; `r` = si / no / nadie),
+  `cerebro/llamadas.py` (`_proponer` manda `extra.opciones`). Pruebas: bloque «lista:» de `test_acciones.py`.
+
+## Versión y actualizaciones
+Moon > Sistema > Versión y actualizaciones: dos semáforos y el botón **Buscar actualizaciones** (fuerza la consulta y muestra la hora).
+- **Aplicación:** compara la versión instalada con la última release de GitHub (`Actualizaciones.kt`, sin token; el repositorio debe ser público).
+  Si no puede consultar dice «No pude comprobar» (nunca «Al día») y por qué: sin conexión, límite de GitHub o sin releases públicas.
+- **Servidor de Termux:** `GET /version` (versión, protocolo, commit) y `POST /git/comprobar` (hace `git fetch`, no cambia tus archivos, y cuenta los
+  commits por bajar). Los cambios se bajan a mano con `git pull` en Termux y se reinicia el servidor. Código en `version_moon.py`.
+- **Compatibilidad:** `PROTOCOLO`/`MIN_APP` en `version_moon.py` y `PROTOCOLO_APP`/`MIN_SERVIDOR` en `Actualizaciones.kt`. Subir el número del que cambie
+  cuando app y servidor se hablen distinto; si no cuadran sale en rojo qué hay que actualizar.
+- Al entrar solo se usa lo guardado (máx. una hora) y `/version`, sin red; `git fetch` y GitHub solo al pulsar el botón.
+
+## Pendiente de verificar en el móvil (cambios de esta versión)
+- El Kotlin no se compiló fuera de GitHub Actions: el primer build valida `Tarjeta.kt`, `Actualizaciones.kt` y `Ajustes.kt`.
+- Probar: «llama a daniel» con varios parecidos (lista, ✓ en la fila 2, ✕, «No llamar a nadie»), la pregunta de batería sin overlay abierto, y la tarjeta encima de otra app.
+- Probar «Buscar actualizaciones» con datos y sin datos (debe decir «No pude comprobar»). Si GitHub da 404: el repositorio no es público o no hay releases.
+- El servidor debe estar en un repositorio git con remoto (`git branch -u origin/main`) para que el semáforo del servidor vea los cambios por bajar.

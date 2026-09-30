@@ -25,11 +25,16 @@ def sino(tn):
 
 class DialogoMixin:
     # ---------- preguntas si/no ----------
-    def preguntar(self, pregunta, si, no, espera=None, extra=None):
+    def preguntar(self, pregunta, si, no, espera=None, extra=None, elegir=None, descartar=None, nadie=None):
         """si/no: funciones que devuelven el texto a decir. `extra` (opcional) son datos para la tarjeta de la
-        app (por ejemplo {"tipo": "llamar", "cid": "12", "nombre": "La Pura"}); nunca llevan datos privados."""
+        app (por ejemplo {"tipo": "llamar", "cid": "12", "nombre": "La Pura"}); nunca llevan datos privados.
+        Solo para la tarjeta con lista de opciones (toques, no voz):
+          elegir    {cid: funcion}: «Sí» tocado en la fila de ese cid.
+          descartar funcion(cid): «No» tocado en la fila de ese cid (quita solo esa opción).
+          nadie     funcion: «No llamar a nadie» (cierra todo sin pasar al siguiente)."""
         p = {"si": si, "no": no, "intentos": 0, "auto": False, "espera": espera or cfg.ESPERA_RESPUESTA,
-             "id": os.urandom(3).hex(), "texto": pregunta, "extra": dict(extra or {})}
+             "id": os.urandom(3).hex(), "texto": pregunta, "extra": dict(extra or {}),
+             "elegir": dict(elegir or {}), "descartar": descartar, "nadie": nadie}
         with self._lock:
             self.pendiente = p
         log_evento({"tipo": "pregunta", "texto": pregunta})
@@ -63,23 +68,39 @@ class DialogoMixin:
         return {"id": p["id"], "texto": p["texto"], "restante": round(restante, 1),
                 "espera": p["espera"], "extra": p["extra"]}
 
-    def responder_toque(self, r, pid=None):
-        """Respuesta tocada en la tarjeta ('si' / 'no'). Se resuelve en segundo plano para que la petición HTTP
-        vuelva al instante. False si ya no hay pregunta (expiró, se respondió por voz) o es otra distinta."""
+    def responder_toque(self, r, pid=None, cid=None):
+        """Respuesta tocada en la tarjeta ('si' / 'no' / 'nadie'; con `cid` si se tocó la fila de una opción).
+        Se resuelve en segundo plano para que la petición HTTP vuelva al instante. False si ya no hay pregunta
+        (expiró, se respondió por voz) o es otra distinta, o si el cid no es una opción de esta pregunta."""
         p = self.pendiente
-        if r not in ("si", "no") or not p or (pid and p["id"] != pid):
+        if r not in ("si", "no", "nadie") or not p or (pid and p["id"] != pid):
             return False
-        threading.Thread(target=self._resolver_toque, args=(p, r), daemon=True).start()
+        if cid is not None:
+            cid = str(cid)[:40]
+            if r == "si" and cid not in p["elegir"]:
+                return False
+            if r == "no" and not p["descartar"]:
+                return False
+        if r == "nadie" and not p["nadie"]:
+            r = "no"
+        threading.Thread(target=self._resolver_toque, args=(p, r, cid), daemon=True).start()
         return True
 
-    def _resolver_toque(self, p, r):
-        reg = {"id": os.urandom(4).hex(), "tipo": "frase", "texto": "(toque) " + ("sí" if r == "si" else "no"),
-               "norm": r}
+    def _resolver_toque(self, p, r, cid=None):
+        rr = "no" if r == "nadie" else r
+        reg = {"id": os.urandom(4).hex(), "tipo": "frase", "texto": "(toque) " + ("sí" if rr == "si" else "no"),
+               "norm": rr}
         with self._lock:
             if self.pendiente is not p:          # mientras tanto respondió por voz o expiró
                 return
-            reg.update(via="toque", respuesta=r)
-            self._decidir(p, r, reg)
+            if r == "si" and cid in p["elegir"]:
+                p["si"] = p["elegir"][cid]
+            elif r == "no" and cid and p["descartar"]:
+                p["no"] = lambda f=p["descartar"], c=cid: f(c)
+            elif r == "nadie":
+                p["no"] = p["nadie"]
+            reg.update(via="toque", respuesta=rr)
+            self._decidir(p, rr, reg)
 
     def _responder_pendiente(self, tn, reg):
         p = self.pendiente

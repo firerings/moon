@@ -177,16 +177,22 @@ class LlamadasMixin:
         return self._proponer(q, cands, 0)
 
     def _proponer(self, q, cands, k):
-        """Pregunta por el candidato k; si dice que no, pasa al siguiente."""
+        """Pregunta por el candidato k; si dice que no por voz, pasa al siguiente. La tarjeta de la app muestra
+        en lista los candidatos desde k (hasta 4) para elegir con un toque."""
         if k >= len(cands):
             return "Está bien, no llamo a nadie"
         c = cands[k]
         nombre = self._nombre_corto(c)
+        resto = cands[k:k + 4]
         # `extra` le dice a la app qué tarjeta dibujar. Solo id y nombre: el número lo busca la app en tu móvil.
         self.preguntar("¿Llamo a %s?" % nombre,
                        lambda: self._marcar(c, q, len(cands) == 1),     # alias solo si no había duda entre varios
                        lambda: self._proponer(q, cands, k + 1),
-                       extra={"tipo": "llamar", "cid": c["i"], "nombre": nombre, "k": k + 1, "n": len(cands)})
+                       extra={"tipo": "llamar", "cid": c["i"], "nombre": nombre, "k": k + 1, "n": len(cands),
+                              "opciones": [{"cid": x["i"], "nombre": self._nombre_corto(x)} for x in resto]},
+                       elegir={x["i"]: (lambda x=x: self._marcar(x, q, False)) for x in resto},
+                       descartar=lambda cid: self._proponer(q, [x for x in cands[k:] if x["i"] != cid], 0),
+                       nadie=lambda: "Está bien, no llamo a nadie")
         return None
 
     def _marcar(self, c, q, aprender=False):

@@ -3,6 +3,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from vosk import Model, KaldiRecognizer, SetLogLevel
 import acciones
+import version_moon
 
 SetLogLevel(-1)
 MODEL = "/storage/emulated/0/Download/ProyectosTermux/Models/vosk-model-small-es-0.42"
@@ -573,6 +574,10 @@ class H(BaseHTTPRequestHandler):
                          "finales": [f for f in E["finales"] if f["n"] > d],
                          "orden": orden_vista(), "ahorro": CEREBRO.ahorro, "pregunta": CEREBRO.vista_pregunta(),
                          "sid": ACC["sid"], "acciones": acciones_pendientes()})
+        elif u.path == "/pregunta":                      # solo la tarjeta Sí/No; no cuenta como «app mirando»
+            self._j({"pregunta": CEREBRO.vista_pregunta()})
+        elif u.path == "/version":
+            self._j(version_moon.info())
         elif u.path == "/actividad":
             self._j({"items": leer_actividad()})
         elif u.path == "/detalle":
@@ -645,7 +650,10 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/responder":
             d = self._cuerpo_json(300) or {}
             r, pid = str(d.get("r", "")), str(d.get("id", ""))[:20]
-            self._j({"ok": CEREBRO.responder_toque(r, pid or None)})
+            cid = d.get("cid")
+            self._j({"ok": CEREBRO.responder_toque(r, pid or None, str(cid) if cid else None)})
+        elif u.path == "/git/comprobar":                 # git fetch (puede tardar con mala conexión); no cambia tus archivos
+            self._j(version_moon.comprobar_remoto())
         elif u.path == "/probar":
             d = self._cuerpo_json(2000)
             texto = str((d or {}).get("texto", "")).strip()[:300]
