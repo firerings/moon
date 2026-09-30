@@ -11,7 +11,7 @@ while true; do
     body=$(echo "$m" | jq -r .body | tr 'A-Z' 'a-z')
     if [ "${num: -9}" = "${NUMERO: -9}" ] && [[ "$body" == *"$(echo "$PALABRA" | tr A-Z a-z)"* ]]; then
       log "orden recibida de $num"
-      printf '{"t":%s,"tipo":"orden","nombre":"Reiniciar conexión","via":"SMS autorizado"}\n' "$(date +%s)" >> "$DIR/logs/actividad.jsonl"
+      printf '{"t":%s,"tipo":"orden","nombre":"Reiniciar conexión","via":"SMS autorizado"}\n' "$(date +%s)" >> "$ACT_LOG"
       "$DIR/reiniciar.sh" &
     fi
   done

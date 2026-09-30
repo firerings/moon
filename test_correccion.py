@@ -5,6 +5,9 @@ TMP = tempfile.mkdtemp(prefix="moon_test_")
 D = os.path.join(TMP, "ProyectosTermux", "netguard")
 shutil.copytree(SRC, D, ignore=shutil.ignore_patterns(".git", ".token", "config.sh", "logs", "apps_alias.json", "__pycache__", "app"))
 os.environ["HOME"] = TMP; os.environ["MOON_LOGDIR"] = os.path.join(TMP, "MoonLogs")
+os.makedirs(os.path.join(D, "logs"), exist_ok=True)
+open(os.path.join(D, "logs", "actividad.jsonl"), "w", encoding="utf-8").write(
+    '{"t":1700000000.0,"tipo":"orden","nombre":"Reiniciar conexión","via":"SMS autorizado"}\n')
 sys.path.insert(0, D); os.chdir(D)
 fake = types.ModuleType("vosk")
 fake.Model = lambda p: object(); fake.KaldiRecognizer = lambda *a, **k: object(); fake.SetLogLevel = lambda x: None
@@ -42,7 +45,12 @@ ac.log_evento({"id": "f2", "tipo": "frase", "texto": "ahora es", "via": "nlu", "
 
 s, j = req("/actividad"); items = j["items"]
 chk("actividad: todos los items traen id", all(it.get("id") for it in items))
-it_txt = next(i for i in items if i["tipo"] == "texto"); it_ord = next(i for i in items if i["tipo"] == "orden")
+it_txt = next(i for i in items if i.get("texto") == "abre de negra" and i["tipo"] == "texto")
+it_ord = next(i for i in items if i.get("nombre") == "Decir la hora")
+it_sms = next((i for i in items if i.get("via") == "SMS autorizado"), None)
+chk("migracion: el historial viejo de logs/ pasa a MoonLogs", it_sms is not None and os.path.exists(os.path.join(TMP, "MoonLogs", "actividad.jsonl")))
+chk("migracion: el archivo viejo queda como .migrado", os.path.exists(os.path.join(D, "logs", "actividad.jsonl.migrado")) and not os.path.exists(os.path.join(D, "logs", "actividad.jsonl")))
+chk("entrada sin id (script bash) recibe un id estable", bool(it_sms and it_sms["id"].startswith("t")))
 chk("actividad: la orden lleva dur_ms y texto", it_ord.get("dur_ms") == 40 and it_ord.get("texto") == "ahora es")
 
 s, j = req("/detalle?id=" + it_txt["id"])
@@ -58,12 +66,14 @@ s, j = req("/actividad"); it = next(i for i in j["items"] if i["id"] == it_txt["
 chk("actividad refleja la correccion", it.get("fb") == "corr" and it.get("dije") == "abre telegram")
 
 before = ac.Cerebro.resolver_app(vs.CEREBRO, "abre negra".split(" ", 1)[1], vs.CEREBRO.apps_instaladas())
-s, j = req("/alias", "POST", {"alias": sug["alias"], "pkg": sug["pkg"]})
+s, j = req("/alias", "POST", {"id": it_txt["id"], "alias": sug["alias"], "pkg": sug["pkg"], "nombre": sug["nombre"]})
 chk("guardar alias", s == 200 and j["ok"] is True)
 r = vs.CEREBRO.resolver_app(sug["alias"], vs.CEREBRO.apps_instaladas())
 chk("tras guardar, el alias resuelve a Telegram al instante", r and r["pkg"] == "org.telegram.messenger" and r["score"] == 1.0)
 chk("apps_alias.json es JSON valido", isinstance(json.load(open(D + "/apps_alias.json")), dict))
 
+s, j = req("/actividad"); it = next(i for i in j["items"] if i["id"] == it_txt["id"])
+chk("actividad muestra el alias guardado junto a la correccion", it.get("alias") == sug["alias"] and it.get("alias_nombre") == "Telegram" and it.get("dije") == "abre telegram")
 s, j = req("/alias", "POST", {"alias": "loquesea", "pkg": "com.no.existe"}); chk("alias con paquete inexistente se rechaza", j["ok"] is False)
 s, j = req("/corregir", "POST", {"id": it_ord["id"], "fb": "ok"}); chk("marcar correcto (ok) sin sugerencia", s == 200 and j["sugerencia"] is None)
 s, j = req("/corregir", "POST", {"id": "x", "fb": "corr", "oido": "a", "dije": ""}); chk("correccion vacia -> 400", s == 400)
@@ -73,6 +83,10 @@ s, j = req("/actividad", token="malo"); chk("sin token valido -> 401", s == 401)
 # ya lo entiende: no propone alias repetido
 s, j = req("/corregir", "POST", {"id": it_txt["id"], "fb": "corr", "oido": "abre negra", "dije": "abre telegram"})
 chk("si ya lo entendia, no repite la sugerencia", s == 200 and j["sugerencia"] is None)
+s, j = req("/actividad"); it = next(i for i in j["items"] if i["id"] == it_txt["id"])
+chk("una correccion nueva borra el alias de la anterior", it.get("dije") == "abre telegram" and "alias" not in it)
+chk("actividad y correcciones estan en MoonLogs", all(os.path.exists(os.path.join(TMP, "MoonLogs", n)) for n in ("actividad.jsonl", "correcciones.jsonl")))
+chk("ya no se crean en la carpeta del proyecto", not os.path.exists(os.path.join(D, "logs", "correcciones.jsonl")))
 lin = [json.loads(l) for l in open(os.path.join(TMP, "MoonLogs", os.listdir(os.path.join(TMP, "MoonLogs"))[0]))]
 chk("el log diario guarda correcciones y alias", any(e["tipo"] == "correccion" for e in lin) and any(e["tipo"] == "alias_guardado" for e in lin))
 print("\nFALLOS:", fallos)

@@ -1,4 +1,4 @@
-import json, subprocess, threading, os, re, secrets, time, queue, datetime
+import json, subprocess, threading, os, re, secrets, time, queue, datetime, shutil
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from vosk import Model, KaldiRecognizer, SetLogLevel
@@ -13,9 +13,37 @@ if not os.path.exists(TF):
     open(TF, "w").write(secrets.token_hex(8))
     os.chmod(TF, 0o600)
 TOKEN = open(TF).read().strip()
-ACT = os.path.join(DIR, "logs", "actividad.jsonl")
-FB = os.path.join(DIR, "logs", "correcciones.jsonl")
-os.makedirs(os.path.dirname(ACT), exist_ok=True)
+os.makedirs(os.path.join(DIR, "logs"), exist_ok=True)      # servidor.log y netguard.log siguen aqui (llevan token y numero)
+
+
+def _dir_logs():
+    """Historial y correcciones van a Download/MoonLogs (acciones.LOGDIR); si no se puede escribir, a logs/."""
+    try:
+        os.makedirs(acciones.LOGDIR, exist_ok=True)
+        return acciones.LOGDIR
+    except OSError:
+        return os.path.join(DIR, "logs")
+
+
+LOGS = _dir_logs()
+ACT = os.path.join(LOGS, "actividad.jsonl")
+FB = os.path.join(LOGS, "correcciones.jsonl")
+
+
+def _migrar(nombre, destino):
+    """Si el archivo esta en el sitio antiguo (logs/) y en el nuevo no existe, lo copia y deja el viejo como .migrado."""
+    viejo = os.path.join(DIR, "logs", nombre)
+    if os.path.abspath(viejo) == os.path.abspath(destino) or not os.path.exists(viejo) or os.path.exists(destino):
+        return
+    try:
+        shutil.copyfile(viejo, destino)
+        os.rename(viejo, viejo + ".migrado")
+    except OSError:
+        pass
+
+
+_migrar("actividad.jsonl", ACT)
+_migrar("correcciones.jsonl", FB)
 
 
 def pausa(n, d):
@@ -58,6 +86,15 @@ def id_de(it):
     return it.get("id") or "t%d" % int(float(it.get("t", 0)) * 10)
 
 
+def escribir_fb(reg):
+    try:
+        with open(FB, "a", encoding="utf-8") as f:
+            f.write(json.dumps(reg, ensure_ascii=False) + "\n")
+        return True
+    except OSError:
+        return False
+
+
 def leer_correcciones(limite=800):
     """{id: ultimo registro de feedback}."""
     try:
@@ -69,9 +106,10 @@ def leer_correcciones(limite=800):
     for ln in lineas:
         try:
             r = json.loads(ln)
-            out[r["id"]] = r
+            i = r["id"]
         except (ValueError, KeyError):
-            pass
+            continue
+        out[i] = r if "fb" in r else {**out.get(i, {}), **r}   # un fb nuevo reemplaza; un alias se suma
     return out
 
 
@@ -94,6 +132,9 @@ def leer_actividad(limite=40):
             it["fb"] = r.get("fb")
             if r.get("dije"):
                 it["dije"] = r["dije"]
+            if r.get("alias"):
+                it["alias"] = r["alias"]
+                it["alias_nombre"] = r.get("alias_nombre", "")
         out.append(it)
     return out
 
@@ -392,10 +433,7 @@ class H(BaseHTTPRequestHandler):
             if fb not in ("ok", "corr") or not i or (fb == "corr" and not dije):
                 return self._j({"error": "parametros"}, 400)
             reg = {"id": i, "fb": fb, "oido": oido, "dije": dije, "t": round(time.time(), 1)}
-            try:
-                with open(FB, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(reg, ensure_ascii=False) + "\n")
-            except OSError:
+            if not escribir_fb(reg):
                 return self._j({"error": "disco"}, 500)
             acciones.log_evento({"tipo": "correccion", "frase_id": i, "fb": fb, "oido": oido, "dije": dije})
             sug = CEREBRO.sugerir_alias(oido, dije) if fb == "corr" else None
@@ -406,9 +444,13 @@ class H(BaseHTTPRequestHandler):
                 alias, pkg = str(d["alias"]), str(d["pkg"])
             except (TypeError, KeyError):
                 return self._j({"error": "formato"}, 400)
+            fid, nombre = str(d.get("id", ""))[:40], str(d.get("nombre", ""))[:80]
             ok = CEREBRO.guardar_alias(alias, pkg)
             if ok:
-                acciones.log_evento({"tipo": "alias_guardado", "alias": alias, "pkg": pkg})
+                acciones.log_evento({"tipo": "alias_guardado", "alias": alias, "pkg": pkg, "frase_id": fid})
+                if fid:
+                    escribir_fb({"id": fid, "alias": alias, "alias_pkg": pkg, "alias_nombre": nombre,
+                                 "t": round(time.time(), 1)})
             self._j({"ok": ok})
         elif self.path == "/parar":
             parar.set()

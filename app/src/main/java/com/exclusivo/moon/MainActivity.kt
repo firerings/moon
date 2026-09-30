@@ -160,9 +160,8 @@ class MainActivity : Activity() {
         cont.addView(t1)
         val t3 = tarjeta()
         t3.addView(tv("Franja del gesto", 13f, c(R.color.moon_muted)).apply { setPadding(0, dp(10), 0, dp(2)) })
-        t3.addView(filaSwitch("Mostrar franja", "fr_visible"))
         t3.addView(filaSwitch("Desbloquear para mover", "fr_mover"))
-        t3.addView(filaSwitch("Ocultar franja", "fr_oculto"))
+        t3.addView(filaSwitch("Ocultar franja", "fr_oculto", true))
         t3.addView(barra("Alto", "fr_alto", 12, 6, 120))
         t3.addView(barra("Ancho", "fr_ancho", 56, 16, 320))
         t3.addView(tv("Restablecer posición y tamaño", 14f, c(R.color.moon_accent)).apply {
@@ -172,8 +171,8 @@ class MainActivity : Activity() {
                 recreate()
             }
         })
-        t3.addView(tv("Con la franja desbloqueada arrástrala; al terminar, bloquéala. Necesita el gesto de esquina activo. " +
-            "Si la ocultas, sigue el botón «Hablar» de la notificación.", 12f, c(R.color.moon_muted)).apply { setPadding(0, 0, 0, dp(10)) })
+        t3.addView(tv("Desbloqueada se ve y se arrastra; al terminar, bloquéala. Oculta es invisible pero sigue funcionando. " +
+            "Necesita el gesto de esquina activo.", 12f, c(R.color.moon_muted)).apply { setPadding(0, 0, 0, dp(10)) })
         cont.addView(t3, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
         val v = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "?" } catch (e: Exception) { "?" }
         verApp = v
@@ -403,14 +402,14 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun filaSwitch(t: String, clave: String): LinearLayout {
+    private fun filaSwitch(t: String, clave: String, def: Boolean = false): LinearLayout {
         var chip: TextView? = null
         fun pinta() {
-            val on = prefs.getBoolean(clave, false)
+            val on = prefs.getBoolean(clave, def)
             chip?.text = if (on) "Sí" else "No"
             chip?.setTextColor(c(if (on) R.color.moon_ok else R.color.moon_muted))
         }
-        val (f, ch) = fila(t) { prefs.edit().putBoolean(clave, !prefs.getBoolean(clave, false)).apply(); pinta() }
+        val (f, ch) = fila(t) { prefs.edit().putBoolean(clave, !prefs.getBoolean(clave, def)).apply(); pinta() }
         chip = ch
         pinta()
         return f
@@ -504,6 +503,16 @@ class MainActivity : Activity() {
         raiz.addView(tv(if (esOrden) o.optString("nombre", "Orden") else "«$oido»", 18f, c(R.color.moon_text), true))
         if (esOrden && oido.isNotEmpty())
             raiz.addView(tv("Oí: «$oido»", 14f, c(R.color.moon_muted)).apply { setPadding(0, dp(4), 0, 0) })
+        val fb = o.optString("fb")
+        val dijeAnt = o.optString("dije")
+        val estado = when (fb) {
+            "ok" -> "✓ Marcado como correcto"
+            "corr" -> "Corregido" + (if (dijeAnt.isNotEmpty()) ": dijiste «$dijeAnt»" else "") +
+                (if (o.optString("alias").isNotEmpty()) "\nAlias guardado: «${o.optString("alias")}» → ${o.optString("alias_nombre")}" else "")
+            else -> ""
+        }
+        if (estado.isNotEmpty())
+            raiz.addView(tv(estado, 14f, c(R.color.moon_ok)).apply { setPadding(0, dp(8), 0, 0) })
         val info = tv("Cargando detalle…", 13f, c(R.color.moon_muted)).apply { setPadding(0, dp(10), 0, dp(2)) }
         raiz.addView(info)
         val zona = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -525,8 +534,10 @@ class MainActivity : Activity() {
             zona.addView(filaBotones(
                 boton("No", false) { dlg.dismiss() },
                 boton("Sí, recordar", true) {
-                    postJson("/alias", JSONObject().put("alias", sug.optString("alias")).put("pkg", sug.optString("pkg"))) { j ->
+                    postJson("/alias", JSONObject().put("id", id).put("alias", sug.optString("alias"))
+                        .put("pkg", sug.optString("pkg")).put("nombre", sug.optString("nombre"))) { j ->
                         Toast.makeText(this, if (j != null) "Alias guardado" else "No se pudo guardar el alias", Toast.LENGTH_SHORT).show()
+                        if (j != null) cargarActividad()
                         dlg.dismiss()
                     }
                 }))
@@ -538,6 +549,7 @@ class MainActivity : Activity() {
                 hint = if (esOrden) "Lo que dije fue… (ej. abre telegram)" else "Lo que dije fue…"
                 setTextColor(c(R.color.moon_text)); setHintTextColor(c(R.color.moon_muted)); textSize = 16f
                 isSingleLine = true; inputType = InputType.TYPE_CLASS_TEXT
+                if (fb == "corr" && dijeAnt.isNotEmpty()) { setText(dijeAnt); setSelection(dijeAnt.length) }
             }
             zona.addView(et, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
             zona.addView(filaBotones(
@@ -565,7 +577,7 @@ class MainActivity : Activity() {
                     dlg.dismiss()
                 }
             },
-            boton("Corregir", true) { formularioCorreccion() }))
+            boton(if (fb == "corr") "Corregir de nuevo" else "Corregir", true) { formularioCorreccion() }))
 
         val marco = FrameLayout(this).apply { setPadding(dp(10), 0, dp(10), dp(10)); addView(raiz) }
         dlg.setContentView(marco)

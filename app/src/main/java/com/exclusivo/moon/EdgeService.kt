@@ -21,7 +21,8 @@ import kotlin.math.abs
 /**
  * Franja en la esquina inferior izquierda (configurable). Al deslizar hacia la derecha abre el overlay.
  * Preferencias (dp): fr_alto, fr_ancho, fr_x (desde la izquierda), fr_sube (desde abajo).
- * Interruptores: fr_visible (se dibuja), fr_mover (desbloqueada: se arrastra), fr_oculto (se quita).
+ * Interruptores: fr_oculto (por defecto si: invisible pero activa; el gesto funciona igual) y
+ * fr_mover (desbloqueada: se ve y se arrastra). La franja nunca se quita mientras el servicio corre.
  * Cualquier cambio en una preferencia fr_* se aplica al instante, sin reiniciar el servicio.
  */
 class EdgeService : Service() {
@@ -86,8 +87,7 @@ class EdgeService : Service() {
         val p = lp ?: return
         val dm = resources.displayMetrics
         val moviendo = pr.getBoolean("fr_mover", false)
-        val oculto = pr.getBoolean("fr_oculto", false) && !moviendo
-        val visible = pr.getBoolean("fr_visible", false) || moviendo
+        val visible = moviendo || !pr.getBoolean("fr_oculto", true)
         p.width = (pr.getInt("fr_ancho", 56).coerceIn(16, 400) * d).toInt()
         p.height = (pr.getInt("fr_alto", 12).coerceIn(6, 400) * d).toInt()
         p.x = (pr.getInt("fr_x", 0) * d).toInt().coerceIn(0, maxOf(0, dm.widthPixels - p.width))
@@ -98,9 +98,7 @@ class EdgeService : Service() {
             if (moviendo) setStroke((2 * d).toInt(), Color.WHITE)
         } else null
         try {
-            if (oculto) {
-                if (agregada) { wm.removeView(v); agregada = false }
-            } else if (agregada) wm.updateViewLayout(v, p)
+            if (agregada) wm.updateViewLayout(v, p)
             else { wm.addView(v, p); agregada = true }
         } catch (e: Exception) { /* sin permiso de superposición o vista ya quitada: se ignora */ }
     }
@@ -129,7 +127,7 @@ class EdgeService : Service() {
             MotionEvent.ACTION_UP ->
                 if (mover) {
                     if (arrastro) pr.edit().putInt("fr_x", (p.x / d).toInt()).putInt("fr_sube", (p.y / d).toInt()).apply()
-                } else if (!lanzado && panel == null && pr.getBoolean("fr_visible", false) &&
+                } else if (!lanzado && panel == null && !pr.getBoolean("fr_oculto", true) &&
                     abs(e.rawX - x0) < 12 * d && abs(e.rawY - y0) < 12 * d && e.eventTime - t0 < 400) {
                     mostrar()   // si la franja se ve, un toque corto también la abre
                 }

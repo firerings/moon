@@ -41,7 +41,7 @@ Termux es el cerebro (`voz_servidor.py`, Vosk offline) y la app Kotlin es la car
 
 API local (cabecera `X-Moon-Token`):
 - `GET /estado?desde=N`: escuchando, texto parcial, frases finales, orden en curso y `act` (cambia cuando cambia el historial)
-- `GET /actividad`: últimos 40 eventos de `logs/actividad.jsonl` (texto oído y órdenes, por voz o por SMS)
+- `GET /actividad`: últimos 40 eventos de `Download/MoonLogs/actividad.jsonl` (texto oído y órdenes, por voz o por SMS)
 - `GET /sistema`: Shizuku activo y modelo de voz
 - `POST /escuchar`, `POST /parar`, `POST /limpiar` (vacía el historial)
 
@@ -80,9 +80,13 @@ Franja fina en el borde inferior izquierdo: tocar y deslizar a la derecha abre e
 resultado, ms). Botones: "Estuvo bien" y "Corregir" (escribes lo que dijiste). Si lo corregido es una app
 instalada que lo oido no alcanzaba, Moon propone guardar el alias y lo escribe en `apps_alias.json` (vale al instante).
 - Servidor: `GET /detalle?id=`, `POST /corregir` `{id, fb: ok|corr, oido, dije}`, `POST /alias` `{alias, pkg}`.
-- Datos: `logs/correcciones.jsonl` (una linea por feedback) y eventos `correccion` / `alias_guardado` en `MoonLogs`.
+- Datos en `Download/MoonLogs`: `actividad.jsonl`, `correcciones.jsonl` (una linea por feedback; un alias se suma a su correccion) y eventos
+  `correccion` / `alias_guardado` en el diario. Al arrancar, el servidor migra los archivos antiguos de `logs/` (quedan como `.migrado`).
+  `servidor.log` y `netguard.log` siguen en `logs/` porque llevan el token y el numero autorizado.
+- La hoja de detalle muestra si la entrada esta corregida (o marcada correcta) y el alias guardado; permite corregir de nuevo.
 - Cada frase lleva `id` y cada evento `t` (epoch); las ordenes de la tarjeta guardan `texto`, `frase_id` y `dur_ms`.
 
-**Franja.** Sistema > Franja del gesto: mostrar, desbloquear para mover (arrastrar), ocultar, alto y ancho con
-deslizadores (dp) y restablecer. Prefs `fr_visible`, `fr_mover`, `fr_oculto`, `fr_alto`, `fr_ancho`, `fr_x`, `fr_sube`;
-se aplican al instante. La notificacion trae el boton "Hablar" (abre el overlay aunque la franja este oculta).
+**Franja.** Sistema > Franja del gesto: desbloquear para mover (se ve y se arrastra), ocultar (invisible pero activa, es lo normal),
+alto y ancho con deslizadores (dp) y restablecer. Prefs `fr_mover`, `fr_oculto` (por defecto si), `fr_alto`, `fr_ancho`,
+`fr_x`, `fr_sube`; se aplican al instante. Con la franja visible, un toque corto tambien abre el overlay.
+La notificacion trae el boton "Hablar".
