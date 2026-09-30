@@ -1,0 +1,15 @@
+config.sh
+logs/
+.lock/
+build/
+.gradle/
+local.properties
+.token
+estado_moon.json
+apps_cache.json
+__pycache__/
+apps_app.json
+contactos.json
+contactos_alias.json
+contactos_uso.json
+ajustes.json

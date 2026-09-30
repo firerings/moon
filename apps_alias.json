@@ -1,5 +1,20 @@
 {
  "aureo whatsapp": [
   "com.whatsapp"
+ ],
+ "termo": [
+  "com.termux"
+ ],
+ "terminal": [
+  "com.termux"
+ ],
+ "apuestas": [
+  "org.xbet.client1"
+ ],
+ "galindez tacon": [
+  "com.greenheartgames.gdt"
+ ],
+ "vendetta con": [
+  "com.greenheartgames.gdt"
  ]
 }

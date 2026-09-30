@@ -98,10 +98,33 @@ La notificacion trae el boton "Hablar".
 - El servicio `EdgeService` vive mientras esté activa la franja, «Luna» o el auricular; la franja solo se dibuja si «gesto» está activo. Se necesita el permiso de superposición.
 - **Auriculares Bluetooth con gesto de «asistente de voz»** (QCY, etc.): mandan el Intent `VOICE_COMMAND`, que recoge `VozActivity` (sin pantalla): Moon saluda por voz y abre el overlay. No depende del interruptor del auricular.
 
+## Linterna y batería desde la APK
+La app Moon enciende la linterna (`CameraManager`, sin permisos, instantánea) y lee la batería (`BatteryManager`) cuando está conectada al
+servidor: `cerebro/sistema.py` le manda la acción (`linterna` / `bateria`) y espera su confirmación (`/ack`, la batería viaja en `pct` y `carg`).
+Si la app no está conectada, no la recoge o no contesta en `ESPERA_ORDEN_APP` (2,5 s), cae a Termux (`termux-torch`, `termux-battery-status`).
+Nota: Android apaga la linterna si el proceso de Moon muere; si se apaga sola al cerrar la app, dejar activa la franja, «Luna» o el auricular
+(mantienen el servicio vivo) o volver a probar.
+
+## Ajustes (pestaña Sistema)
+Lista de categorías con subpantallas (el botón Atrás vuelve a la lista): **Asistente y servidor**, **Gesto de la franja**, **Otras formas de
+activar**, **Contactos y llamadas**, **Diagnóstico** y **Versión y actualizaciones**. Código en `Ajustes.kt`; `MainActivity.kt` ya no construye la pestaña.
+- **Diagnóstico:** un semáforo por componente (servidor, modelo, NLU, micrófono, Shizuku, permisos, asistente, gesto, «Luna», auricular, apps,
+  contactos, llamadas, linterna, batería) y la caja **Probar frase**: escribe una frase y muestra qué decidiría Moon (vía, acción, intención,
+  confianza, contacto o app resuelta) **sin ejecutar ni hablar**.
+- Servidor: `GET /diagnostico` (estado de todo), `POST /probar` `{texto}`, `GET/POST /ajustes` (`confirmar_llamadas`, se guarda en `ajustes.json`).
+
+## Contactos y llamadas por voz
+- La app Moon lee los contactos con teléfono (permiso `READ_CONTACTS`, se pide en Sistema > Contactos y llamadas) y manda **solo id y nombre**
+  (`POST /contactos` -> `contactos.json`, una vez por hora o con «Sincronizar ahora»). El número no sale del móvil.
+- «llama a Daniel» / «llamar a mi suegro» / «marca a Beth» (`cerebro/llamadas.py`): busca por parecido de **sonido** en español (b/v, h muda, ll/y,
+  c/k/qu, z/s, g/j). Pregunta «¿Llamo a …?»; si dices que no, propone el siguiente parecido (hasta 3). Al decir que sí, el servidor manda
+  `llamar` con el id del contacto y la app busca el número y marca (`CALL_PHONE`).
+- Alias: `contactos_alias.json` (`{"mi suegro": "id"}`), se edita a mano; cuando hay un único parecido y dices que sí, el alias se guarda solo.
+  Se prefiere al contacto más llamado (`contactos_uso.json`).
+- Ajuste **Preguntar antes de llamar** (por defecto sí). Sin la pregunta solo marca directo si el nombre es exacto y único.
+- `python3 chequear_contactos.py` (sin argumentos) lee `contactos.json` y mide qué palabras de tus contactos conoce Vosk.
+- Privacidad: `contactos*.json` y `ajustes.json` están en `.gitignore`.
+
 ## Próximos cambios acordados
 - **Abrir app con nombre dudoso:** si «abre X» no llega al umbral (0,75), proponer la app más parecida por voz («No encuentro Beth. ¿Quieres abrir 1xBet?»); si dice sí, guardar el alias solo.
-- **Llamadas por voz (100% offline, siempre con confirmación):** «llama a Daniel» -> Moon busca el contacto por parecido de sonido, pregunta «¿Llamo a …?» y marca. Plan:
-  1. La app Moon lee los contactos (permiso READ_CONTACTS) y manda al servidor solo nombres e ids (como hace con las apps); el número se queda en el móvil y lo marca la app (CALL_PHONE).
-  2. El servidor indexa cada contacto por sus palabras útiles (sin prefijos «H -», «Dota -», sin «de/del/la», sin emojis ni números) y compara por sonido en español (b/v, h muda, ll/y, c/k/qu, z/s), no por letras.
-  3. Varios parecidos (p. ej. tres contactos con el mismo nombre): pregunta cuál, leyendo un nombre corto. Los apodos y familiares se guardan como alias («mi suegro»), y se prefiere el más llamado.
-  4. `chequear_contactos.py` mide qué palabras de los contactos existen en el vocabulario de Vosk, para saber cuáles solo se alcanzarán por parecido o alias.
+- **Medir el consumo de «Luna»:** batería gastada en unas horas con «Luna» encendida frente a apagada (Redmi 10A).
