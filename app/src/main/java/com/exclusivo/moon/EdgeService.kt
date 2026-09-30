@@ -42,7 +42,10 @@ import kotlin.math.hypot
  * Cualquier cambio en una preferencia fr_* se aplica al instante, sin reiniciar el servicio.
  */
 class EdgeService : Service() {
-    companion object { const val ACCION_ABRIR = "com.exclusivo.moon.ABRIR" }
+    companion object {
+        const val ACCION_ABRIR = "com.exclusivo.moon.ABRIR"
+        const val ACCION_SALUDAR = "com.exclusivo.moon.SALUDAR"   // desde VozActivity: saluda y abre el overlay
+    }
 
     private lateinit var wm: WindowManager
     private lateinit var pr: SharedPreferences
@@ -102,6 +105,7 @@ class EdgeService : Service() {
         lp = WindowManager.LayoutParams(1, 1, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply { gravity = Gravity.BOTTOM or Gravity.START }
+        Voz.calentar(this)
         pr.registerOnSharedPreferenceChangeListener(escucha)
         aplicar()
         extras()
@@ -109,6 +113,7 @@ class EdgeService : Service() {
 
     override fun onStartCommand(i: Intent?, flags: Int, startId: Int): Int {
         if (i?.action == ACCION_ABRIR && panel == null) mostrar()
+        if (i?.action == ACCION_SALUDAR) saludarYAbrir()
         return START_STICKY
     }
 
