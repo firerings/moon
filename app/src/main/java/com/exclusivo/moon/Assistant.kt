@@ -12,6 +12,7 @@ import android.speech.RecognitionService
 import android.speech.SpeechRecognizer
 import android.view.LayoutInflater
 import android.view.View
+import android.widget.ProgressBar
 import android.widget.TextView
 import org.json.JSONObject
 
@@ -49,13 +50,26 @@ class OverlayPanel(private val ctx: Context) {
     private val pOrden = view.findViewById<View>(R.id.ovOrden)
     private val pasos = listOf(R.id.paso1, R.id.paso2, R.id.paso3).map { view.findViewById<TextView>(it) }
 
+    // Tarjeta Sí/No al centro (confirmar llamada, modo ahorro...). Sale cuando /estado trae "pregunta".
+    private val tarjeta = view.findViewById<View>(R.id.ovPregunta)
+    private val pgTitulo = view.findViewById<TextView>(R.id.pgTitulo)
+    private val pgOpcion = view.findViewById<TextView>(R.id.pgOpcion)
+    private val pgNombre = view.findViewById<TextView>(R.id.pgNombre)
+    private val pgNumero = view.findViewById<TextView>(R.id.pgNumero)
+    private val pgBarra = view.findViewById<ProgressBar>(R.id.pgBarra)
+    private var pregId = ""          // pregunta que se está mostrando
+    private var pregIgnorada = ""    // la que acabas de tocar: no se vuelve a dibujar mientras el servidor la cierra
+
     init {
         view.findViewById<View>(R.id.scrim).setOnClickListener { onClose?.invoke() }
         view.findViewById<View>(R.id.ovStop).setOnClickListener { onClose?.invoke() }
+        view.findViewById<View>(R.id.pgSi).setOnClickListener { responder("si") }
+        view.findViewById<View>(R.id.pgNo).setOnClickListener { responder("no") }
     }
 
     fun start() {
         seq = 0; ultimo = ""
+        pregId = ""; pregIgnorada = ""; tarjeta.visibility = View.GONE
         titulo.text = "Escuchando"; texto.text = ""
         pEscucha.visibility = View.VISIBLE; pOrden.visibility = View.GONE
         Thread { Api.call(ctx, "/escuchar", "POST") }.start()
@@ -90,6 +104,7 @@ class OverlayPanel(private val ctx: Context) {
         }
         val j = try { JSONObject(r) } catch (e: Exception) { return }
         if (j.has("auth")) { error("Token incorrecto", "Revísalo en Moon, pestaña Sistema"); return }
+        pintarPregunta(j.optJSONObject("pregunta"))
         if (j.getInt("total") < seq) seq = 0
         val fin = j.getJSONArray("finales")
         for (i in 0 until fin.length()) { val f = fin.getJSONObject(i); seq = maxOf(seq, f.getInt("n")); ultimo = f.getString("t") }
@@ -112,7 +127,52 @@ class OverlayPanel(private val ctx: Context) {
         }
     }
 
+    private fun pintarPregunta(pr: JSONObject?) {
+        val id = pr?.optString("id") ?: ""
+        if (pr == null || id.isEmpty()) { pregIgnorada = ""; ocultarPregunta(); return }
+        if (id == pregIgnorada) return
+        if (id != pregId) {                                   // pregunta nueva: se arma la tarjeta una sola vez
+            pregId = id
+            val ex = pr.optJSONObject("extra")
+            val llamar = ex != null && ex.optString("tipo") == "llamar"
+            pgTitulo.text = if (llamar) "CONFIRMAR LLAMADA" else "MOON PREGUNTA"
+            pgNombre.text = if (llamar) ex!!.optString("nombre") else pr.optString("texto")
+            pgNombre.textSize = if (llamar) 26f else 20f
+            val n = ex?.optInt("n", 1) ?: 1
+            pgOpcion.visibility = if (llamar && n > 1) View.VISIBLE else View.GONE
+            pgOpcion.text = "Opción ${ex?.optInt("k", 1) ?: 1} de $n"
+            pgNumero.visibility = if (llamar) View.VISIBLE else View.GONE
+            pgNumero.text = ""
+            if (llamar) buscarNumero(id, ex!!.optString("cid"))
+            tarjeta.visibility = View.VISIBLE
+        }
+        val espera = maxOf(pr.optDouble("espera", 15.0), 1.0)
+        val resto = pr.optDouble("restante", espera)
+        pgBarra.setProgress((resto / espera * 1000).toInt().coerceIn(0, 1000), true)
+    }
+
+    private fun ocultarPregunta() { pregId = ""; tarjeta.visibility = View.GONE }
+
+    /** El número lo lee esta app de tus contactos; el servidor de Termux solo conoce id y nombre. */
+    private fun buscarNumero(id: String, cid: String) {
+        val app = ctx.applicationContext
+        Thread {
+            val n = Contactos.numeroLegible(app, cid)
+            ui.post { if (pregId == id) pgNumero.text = n ?: "Número no disponible" }
+        }.start()
+    }
+
+    private fun responder(r: String) {
+        val id = pregId
+        if (id.isEmpty()) return
+        pregIgnorada = id
+        ocultarPregunta()
+        val app = ctx.applicationContext
+        Thread { Api.call(app, "/responder", "POST", 3000, JSONObject().put("r", r).put("id", id).toString()) }.start()
+    }
+
     private fun error(t: String, d: String) {
+        ocultarPregunta()
         titulo.text = t; texto.text = d
         pEscucha.visibility = View.GONE; pOrden.visibility = View.GONE
     }

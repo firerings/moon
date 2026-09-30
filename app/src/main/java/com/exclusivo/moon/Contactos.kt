@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.ContactsContract
+import android.telephony.PhoneNumberUtils
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -72,6 +73,13 @@ object Contactos {
             }
         }
         return principal ?: primero
+    }
+
+    /** Número del contacto [cid] con formato, para mostrarlo en la tarjeta de confirmar llamada. Solo se lee en el móvil. */
+    fun numeroLegible(ctx: Context, cid: String): String? {
+        if (cid.isEmpty() || !puedeLeer(ctx)) return null
+        val n = try { numero(ctx, cid) } catch (e: Exception) { null } ?: return null
+        return try { PhoneNumberUtils.formatNumber(n, java.util.Locale.getDefault().country) ?: n } catch (e: Exception) { n }
     }
 
     /** Marca al contacto [cid]. false si falta algún permiso, no hay número o el sistema no deja marcar. */

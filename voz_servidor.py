@@ -571,7 +571,7 @@ class H(BaseHTTPRequestHandler):
                 self._j({"escuchando": E["escuchando"], "parcial": E["parcial"],
                          "total": E["n"], "act": marca_actividad(),
                          "finales": [f for f in E["finales"] if f["n"] > d],
-                         "orden": orden_vista(), "ahorro": CEREBRO.ahorro,
+                         "orden": orden_vista(), "ahorro": CEREBRO.ahorro, "pregunta": CEREBRO.vista_pregunta(),
                          "sid": ACC["sid"], "acciones": acciones_pendientes()})
         elif u.path == "/actividad":
             self._j({"items": leer_actividad()})
@@ -642,6 +642,10 @@ class H(BaseHTTPRequestHandler):
                 self._j({"ok": True, "n": len(lista)})
             except (ValueError, KeyError, TypeError, OSError):
                 self._j({"error": "formato"}, 400)
+        elif u.path == "/responder":
+            d = self._cuerpo_json(300) or {}
+            r, pid = str(d.get("r", "")), str(d.get("id", ""))[:20]
+            self._j({"ok": CEREBRO.responder_toque(r, pid or None)})
         elif u.path == "/probar":
             d = self._cuerpo_json(2000)
             texto = str((d or {}).get("texto", "")).strip()[:300]

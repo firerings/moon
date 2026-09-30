@@ -43,6 +43,7 @@ API local (cabecera `X-Moon-Token`):
 - `GET /estado?desde=N`: escuchando, texto parcial, frases finales, orden en curso y `act` (cambia cuando cambia el historial)
 - `GET /actividad`: últimos 40 eventos de `Download/MoonLogs/actividad.jsonl` (texto oído y órdenes, por voz o por SMS)
 - `GET /sistema`: Shizuku activo y modelo de voz
+- `GET /estado` también trae `pregunta` (la pregunta sí/no abierta: `id`, `texto`, `restante`, `espera`, `extra`) y `POST /responder` `{r: si|no, id}` la contesta con un toque (mismo efecto que decir sí o no)
 - `POST /escuchar`, `POST /parar`, `POST /limpiar` (vacía el historial)
 
 ### Gesto de invocación
@@ -128,3 +129,9 @@ activar**, **Contactos y llamadas**, **Diagnóstico** y **Versión y actualizaci
 ## Próximos cambios acordados
 - **Abrir app con nombre dudoso:** si «abre X» no llega al umbral (0,75), proponer la app más parecida por voz («No encuentro Beth. ¿Quieres abrir 1xBet?»); si dice sí, guardar el alias solo.
 - **Medir el consumo de «Luna»:** batería gastada en unas horas con «Luna» encendida frente a apagada (Redmi 10A).
+
+## Tarjeta Sí/No en pantalla
+Cuando Moon hace una pregunta de sí/no («¿Llamo a la Pura?», modo ahorro...) el overlay muestra una tarjeta centrada: nombre del contacto,
+su **número** (lo lee la app de tus contactos; el servidor solo conoce id y nombre, y por voz tampoco se dice), «Opción 1 de 3» si hay varios
+parecidos, barra con el tiempo que queda y botones ✓ Sí / ✕ No. Se puede contestar tocando o por voz; al contestar de una forma la tarjeta
+se cierra. Código: `cerebro/dialogo.py` (`vista_pregunta`, `responder_toque`), `OverlayPanel` en `Assistant.kt` y `overlay.xml`.

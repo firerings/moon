@@ -279,6 +279,38 @@ ACC["activa"] = False
 chequear("llamada: app cerrada avisa", (dice("llama a hugo") == "¿Llamo a Hugo Mamani?") and dice("si") == "La app Moon no está abierta, no puedo marcar")
 chequear("ajustes: valor desconocido o de tipo malo se rechaza", not acciones.guardar_ajuste("otra", True) and not acciones.guardar_ajuste("confirmar_llamadas", "no"))
 
+# --- tarjeta Sí/No en pantalla (la app la dibuja con /estado y contesta con /responder) ---
+def esperar(cond, t=3.0):
+    fin = time.time() + t
+    while time.time() < fin:
+        if cond():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+cfg.ESPERA_RESPUESTA = 5
+ACC["activa"] = True
+ACC["pedidas"].clear()
+chequear("tarjeta: sin pregunta abierta no hay tarjeta ni se acepta un toque", c.vista_pregunta() is None and not c.responder_toque("si"))
+dice("llama a daniel")
+v = c.vista_pregunta()
+chequear("tarjeta: la pregunta trae texto, contacto y opción k de n",
+         bool(v) and v["texto"] == "¿Llamo a Daniel Lopez?" and v["extra"]["tipo"] == "llamar" and v["extra"]["cid"] == "1"
+         and v["extra"]["k"] == 1 and v["extra"]["n"] >= 2 and 0 < v["restante"] <= 5)
+chequear("tarjeta: el número no viaja en la pregunta", all(k in ("tipo", "cid", "nombre", "k", "n") for k in v["extra"]))
+chequear("tarjeta: un id de otra pregunta se rechaza", not c.responder_toque("si", "zzzz") and c.pendiente is not None)
+chequear("tarjeta: 'No' tocado pasa al siguiente parecido",
+         c.responder_toque("no", v["id"]) and esperar(lambda: (c.vista_pregunta() or {}).get("texto") == "¿Llamo a Daniela Perez?"))
+v2 = c.vista_pregunta()
+chequear("tarjeta: la pregunta nueva tiene otro id y k=2", v2["id"] != v["id"] and v2["extra"]["k"] == 2)
+chequear("tarjeta: 'Sí' tocado marca por id y cierra la pregunta",
+         c.responder_toque("si", v2["id"]) and esperar(lambda: ACC["pedidas"] and ACC["pedidas"][-1]["cid"] == "2")
+         and esperar(lambda: c.pendiente is None and not S["esc"]))
+chequear("tarjeta: respondió por voz y luego toca -> se ignora", (dice("llama a daniel") and dice("si")) and not c.responder_toque("si"))
+cfg.ESPERA_RESPUESTA = 0.4
+ACC["activa"] = False
+
 # --- probar frase: decide sin ejecutar ---
 ACC["activa"] = True
 ACC["pedidas"].clear(); S["dicho"].clear()

@@ -181,9 +181,12 @@ class LlamadasMixin:
         if k >= len(cands):
             return "Está bien, no llamo a nadie"
         c = cands[k]
-        self.preguntar("¿Llamo a %s?" % self._nombre_corto(c),
+        nombre = self._nombre_corto(c)
+        # `extra` le dice a la app qué tarjeta dibujar. Solo id y nombre: el número lo busca la app en tu móvil.
+        self.preguntar("¿Llamo a %s?" % nombre,
                        lambda: self._marcar(c, q, len(cands) == 1),     # alias solo si no había duda entre varios
-                       lambda: self._proponer(q, cands, k + 1))
+                       lambda: self._proponer(q, cands, k + 1),
+                       extra={"tipo": "llamar", "cid": c["i"], "nombre": nombre, "k": k + 1, "n": len(cands)})
         return None
 
     def _marcar(self, c, q, aprender=False):
