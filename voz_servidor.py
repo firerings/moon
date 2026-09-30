@@ -1,4 +1,4 @@
-import json, subprocess, threading, os, re, secrets, time, queue, datetime, shutil
+import json, subprocess, threading, os, re, secrets, time, queue, datetime, shutil, signal, select, atexit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from vosk import Model, KaldiRecognizer, SetLogLevel
@@ -213,11 +213,93 @@ parar = threading.Event()
 
 
 def preparar_audio():
+    subprocess.run(["pkill", "parec"])      # restos de un servidor anterior que murió sin cerrar su captura
     subprocess.run(["pulseaudio", "--start", "--exit-idle-time=-1"])
     fuentes = subprocess.run(["pactl", "list", "short", "sources"],
                              capture_output=True, text=True).stdout
     if "OpenSL_ES_source" not in fuentes:
         subprocess.run(["pactl", "load-module", "module-sles-source"])
+
+
+# ---------- captura de audio (parec) ----------
+# Un parec que se cuelga no entrega bytes pero sigue vivo: por eso se lee con select y tiempo maximo,
+# y todo parec que se lanza se cierra esperando a que suelte el microfono.
+PAREC = ["parec", "--device=OpenSL_ES_source", "--rate=16000", "--channels=1",
+         "--format=s16le", "--latency-msec=100"]
+SIN_AUDIO = 4.0          # s sin un solo byte del microfono antes de dar la captura por colgada
+REINTENTOS_AUDIO = 2     # veces que se relanza la captura antes de rendirse
+PAUSA_RESET = 1.0        # s de espera tras reiniciar PulseAudio
+AUDIO = {"p": None}      # parec de la escucha normal (lo cierra /parar)
+HILO = {"t": None}       # hilo de la escucha normal
+HIJOS = set()            # todos los parec vivos, para cerrarlos al apagar
+
+
+def lanzar_parec():
+    p = subprocess.Popen(PAREC, stdout=subprocess.PIPE)
+    HIJOS.add(p)
+    return p
+
+
+def cerrar_parec(p):
+    """Termina parec y espera a que suelte el microfono (terminate solo no espera)."""
+    if p is None:
+        return
+    try:
+        p.terminate()
+        try:
+            p.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait(timeout=2)
+    except Exception:
+        pass
+    HIJOS.discard(p)
+    try:
+        p.stdout.close()
+    except Exception:
+        pass
+
+
+def leer_audio(p, tope):
+    """Hasta 3200 bytes de parec. None si en `tope` s no llego nada; b"" si parec se cerro."""
+    r, _, _ = select.select([p.stdout], [], [], tope)
+    if not r:
+        return None
+    return os.read(p.stdout.fileno(), 3200)
+
+
+def reiniciar_audio():
+    """Ultimo recurso con el microfono colgado: reinicia PulseAudio y su fuente OpenSL."""
+    subprocess.run(["pulseaudio", "-k"])
+    time.sleep(PAUSA_RESET)
+    preparar_audio()
+
+
+def parar_escucha():
+    """Para la escucha normal y cierra su parec, para no depender de que el hilo vuelva de read()."""
+    parar.set()
+    p = AUDIO["p"]
+    if p is not None:
+        try:
+            p.terminate()
+        except Exception:
+            pass
+
+
+def apagar(signum=None, frame=None):
+    for p in list(HIJOS):
+        try:
+            p.terminate()
+        except Exception:
+            pass
+    os._exit(0)
+
+
+atexit.register(lambda: [p.terminate() for p in list(HIJOS)])
+try:
+    signal.signal(signal.SIGTERM, apagar)
+except ValueError:
+    pass                 # no estamos en el hilo principal (tests)
 
 
 COLA = queue.Queue()
@@ -290,17 +372,35 @@ def trabajador():
 
 
 def escuchar(auto=False):
-    rec = KaldiRecognizer(model, 16000)
-    p = subprocess.Popen(
-        ["parec", "--device=OpenSL_ES_source", "--rate=16000", "--channels=1",
-         "--format=s16le", "--latency-msec=100"], stdout=subprocess.PIPE)
-    ult = time.time()
-    mudo = False
+    rec = None
+    p = None
     try:
+        rec = KaldiRecognizer(model, 16000)
+        ult = time.time()
+        mudo = False
+        fallos = 0
+        sin = time.time()
         while not parar.is_set():
-            data = p.stdout.read(3200)
-            if not data:
+            if p is None:
+                p = lanzar_parec()
+                AUDIO["p"] = p
+                sin = time.time()
+            data = leer_audio(p, 0.5)
+            if data is None:                       # medio segundo sin audio
+                if time.time() - sin > SIN_AUDIO:
+                    fallos += 1
+                    acciones.log_evento({"tipo": "audio_sin_datos", "donde": "escucha", "intento": fallos})
+                    cerrar_parec(p)
+                    p = None
+                    AUDIO["p"] = None
+                    if fallos > REINTENTOS_AUDIO:
+                        break
+                    if fallos == REINTENTOS_AUDIO:
+                        reiniciar_audio()
+                continue
+            if not data:                           # parec se cerro
                 break
+            sin = time.time()
             if CEREBRO.callando():
                 mudo = True
                 ult = time.time()
@@ -324,22 +424,36 @@ def escuchar(auto=False):
                     E["parcial"] = par
                 if par:
                     ult = time.time()
+    except Exception as e:
+        acciones.log_evento({"tipo": "error", "donde": "escuchar", "detalle": repr(e)})
     finally:
-        p.terminate()
+        AUDIO["p"] = None
+        cerrar_parec(p)
         with lock:
-            agregar(json.loads(rec.FinalResult()).get("text", ""))
+            if rec is not None:
+                try:
+                    agregar(json.loads(rec.FinalResult()).get("text", ""))
+                except Exception:
+                    pass
             E["escuchando"] = False
             E["parcial"] = ""
 
 
+def _hilo_vivo():
+    t = HILO["t"]
+    return t is not None and (t.ident is None or t.is_alive())
+
+
 def iniciar_escucha(auto=False):
     with lock:
-        ya = E["escuchando"]
+        ya = E["escuchando"] and _hilo_vivo()      # si la bandera quedo puesta sin hilo, se recupera sola
         if not ya:
             E["escuchando"] = True
+            parar.clear()
+            t = threading.Thread(target=escuchar, args=(auto,), daemon=True)
+            HILO["t"] = t
     if not ya:
-        parar.clear()
-        threading.Thread(target=escuchar, args=(auto,), daemon=True).start()
+        t.start()
 
 
 def esta_escuchando():
@@ -362,13 +476,13 @@ def _es_luna(res):
 
 
 def _sesion_luna(rec):
-    p = subprocess.Popen(
-        ["parec", "--device=OpenSL_ES_source", "--rate=16000", "--channels=1",
-         "--format=s16le", "--latency-msec=100"], stdout=subprocess.PIPE)
+    p = lanzar_parec()
     try:
         rec.Reset()
         while time.time() - LUNA["visto"] < 6 and not E["escuchando"] and not CEREBRO.callando():
-            data = p.stdout.read(3200)
+            data = leer_audio(p, 0.5)
+            if data is None:
+                continue
             if not data:
                 break
             if rec.AcceptWaveform(data):
@@ -379,7 +493,7 @@ def _sesion_luna(rec):
                     acciones.log_evento({"tipo": "luna_oida"})
                     return
     finally:
-        p.terminate()
+        cerrar_parec(p)
 
 
 def vigilar_luna():
@@ -520,7 +634,7 @@ class H(BaseHTTPRequestHandler):
                                  "t": round(time.time(), 1)})
             self._j({"ok": ok})
         elif self.path == "/parar":
-            parar.set()
+            parar_escucha()
             self._j({"ok": True})
         elif self.path == "/limpiar":
             try:
@@ -549,7 +663,7 @@ CEREBRO = acciones.Cerebro(NLU_MODELO, {
     "ui": guardar, "reiniciar": reiniciar_conexion, "iniciar": iniciar_escucha,
     "enviar": enviar_accion, "app_activa": app_activa,
     "servida": accion_servida, "cancelar": marcar_ack,
-    "parar": parar.set, "escuchando": esta_escuchando})
+    "parar": parar_escucha, "escuchando": esta_escuchando})
 CEREBRO.iniciar()
 threading.Thread(target=trabajador, daemon=True).start()
 print("Token:", TOKEN, flush=True)
