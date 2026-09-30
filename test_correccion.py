@@ -87,7 +87,8 @@ s, j = req("/actividad"); it = next(i for i in j["items"] if i["id"] == it_txt["
 chk("una correccion nueva borra el alias de la anterior", it.get("dije") == "abre telegram" and "alias" not in it)
 chk("actividad y correcciones estan en MoonLogs", all(os.path.exists(os.path.join(TMP, "MoonLogs", n)) for n in ("actividad.jsonl", "correcciones.jsonl")))
 chk("ya no se crean en la carpeta del proyecto", not os.path.exists(os.path.join(D, "logs", "correcciones.jsonl")))
-lin = [json.loads(l) for l in open(os.path.join(TMP, "MoonLogs", os.listdir(os.path.join(TMP, "MoonLogs"))[0]))]
+diario = [n for n in os.listdir(os.path.join(TMP, "MoonLogs")) if n.startswith("moon_")]   # el orden de listdir varía según el sistema de archivos
+lin = [json.loads(l) for n in diario for l in open(os.path.join(TMP, "MoonLogs", n), encoding="utf-8")]
 chk("el log diario guarda correcciones y alias", any(e["tipo"] == "correccion" for e in lin) and any(e["tipo"] == "alias_guardado" for e in lin))
 print("\nFALLOS:", fallos)
 shutil.rmtree(TMP, ignore_errors=True)
