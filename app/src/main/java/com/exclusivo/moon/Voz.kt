@@ -1,9 +1,12 @@
 package com.exclusivo.moon
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Voz del asistente con el motor de texto a voz de Android. Se arranca una sola vez, así que
@@ -15,6 +18,7 @@ object Voz : TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
     private var listo = false
     private var espera: Pair<String, Int>? = null
+    private var saludoFin: (() -> Unit)? = null
 
     @Synchronized
     fun calentar(ctx: Context) {
@@ -30,6 +34,19 @@ object Voz : TextToSpeech.OnInitListener {
         if (listo) hablar(texto, id) else espera = Pair(texto, id)
     }
 
+    /** Dice una frase suelta (sin avisar al servidor) y ejecuta [alTerminar] al acabar; si no puede hablar, lo ejecuta ya. */
+    @Synchronized
+    fun decirYLuego(ctx: Context, texto: String, alTerminar: () -> Unit) {
+        calentar(ctx)
+        val hecho = AtomicBoolean(false)
+        val fin: () -> Unit = { if (hecho.compareAndSet(false, true)) Handler(Looper.getMainLooper()).post(alTerminar) }
+        val t = tts
+        if (!listo || t == null) { fin(); return }
+        saludoFin = fin
+        Handler(Looper.getMainLooper()).postDelayed(fin, 5000)   // por si el motor nunca avisa
+        if (t.speak(texto, TextToSpeech.QUEUE_ADD, null, "saludo") != TextToSpeech.SUCCESS) fin()
+    }
+
     @Synchronized
     override fun onInit(status: Int) {
         val t = tts ?: return
@@ -38,8 +55,8 @@ object Voz : TextToSpeech.OnInitListener {
             listo = r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED
             t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(u: String?) {}
-                override fun onDone(u: String?) { confirmar(u, true) }
-                override fun onError(u: String?) { confirmar(u, false) }
+                override fun onDone(u: String?) { if (u == "saludo") saludoFin?.invoke() else confirmar(u, true) }
+                override fun onError(u: String?) { if (u == "saludo") saludoFin?.invoke() else confirmar(u, false) }
             })
         } else {
             listo = false

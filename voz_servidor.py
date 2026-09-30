@@ -346,6 +346,62 @@ def esta_escuchando():
     return E["escuchando"]
 
 
+# ---------- palabra «Luna» ----------
+# La app avisa cada segundo (GET /luna?on=1) mientras el interruptor esta encendido; sin avisos durante
+# 6 s el vigilante se apaga solo. Usa un reconocedor aparte que solo entiende «luna» (barato) y se
+# aparta mientras hay una escucha normal o Moon esta hablando.
+LUNA = {"visto": 0.0, "n": 0, "t": 0.0, "hilo": False}
+UMBRAL_LUNA = 0.6
+
+
+def _es_luna(res):
+    palabras = (res.get("text") or "").split()
+    if "luna" not in palabras or len(palabras) > 2:
+        return False
+    return any(w.get("word") == "luna" and w.get("conf", 1.0) >= UMBRAL_LUNA for w in (res.get("result") or []))
+
+
+def _sesion_luna(rec):
+    p = subprocess.Popen(
+        ["parec", "--device=OpenSL_ES_source", "--rate=16000", "--channels=1",
+         "--format=s16le", "--latency-msec=100"], stdout=subprocess.PIPE)
+    try:
+        rec.Reset()
+        while time.time() - LUNA["visto"] < 6 and not E["escuchando"] and not CEREBRO.callando():
+            data = p.stdout.read(3200)
+            if not data:
+                break
+            if rec.AcceptWaveform(data):
+                res = json.loads(rec.Result())
+                if _es_luna(res) and time.time() - LUNA["t"] > 3:
+                    LUNA["t"] = time.time()
+                    LUNA["n"] += 1
+                    acciones.log_evento({"tipo": "luna_oida"})
+                    return
+    finally:
+        p.terminate()
+
+
+def vigilar_luna():
+    try:
+        try:
+            rec = KaldiRecognizer(model, 16000, '["luna", "[unk]"]')
+        except Exception:
+            rec = KaldiRecognizer(model, 16000)
+        rec.SetWords(True)
+        while time.time() - LUNA["visto"] < 6:
+            if E["escuchando"] or CEREBRO.callando():
+                time.sleep(0.3)
+                continue
+            _sesion_luna(rec)
+            time.sleep(0.2)
+    except Exception as e:
+        acciones.log_evento({"tipo": "error", "donde": "luna", "detalle": str(e)})
+    finally:
+        with lock:
+            LUNA["hilo"] = False
+
+
 class H(BaseHTTPRequestHandler):
     def _j(self, obj, code=200):
         b = json.dumps(obj, ensure_ascii=False).encode()
@@ -380,6 +436,17 @@ class H(BaseHTTPRequestHandler):
             i = parse_qs(u.query).get("id", [""])[0]
             it = next((x for x in leer_actividad(200) if x["id"] == i), None)
             self._j({"evento": buscar_evento(it) if it else None})
+        elif u.path == "/luna":
+            if parse_qs(u.query).get("on", ["0"])[0] == "1":
+                LUNA["visto"] = time.time()
+                with lock:
+                    nuevo = not LUNA["hilo"]
+                    LUNA["hilo"] = True
+                if nuevo:
+                    threading.Thread(target=vigilar_luna, daemon=True).start()
+            else:
+                LUNA["visto"] = 0.0
+            self._j({"n": LUNA["n"], "activo": LUNA["hilo"]})
         elif u.path == "/sistema":
             self._j({"shizuku": shizuku_activo(), "modelo": modelo_corto()})
         else:

@@ -46,7 +46,7 @@ API local (cabecera `X-Moon-Token`):
 - `POST /escuchar`, `POST /parar`, `POST /limpiar` (vacía el historial)
 
 ### Gesto de invocación
-Franja fina en el borde inferior izquierdo: tocar y deslizar a la derecha abre el overlay. Alto, ancho y altura sobre el borde se cambian tocando las filas de Moon > Sistema > Zona del gesto (defecto 12 / 56 / 0 dp). Si la franja tapa una tecla del teclado, bajar el alto o el ancho; con navegación por gestos puede hacer falta subir "Altura sobre el borde".
+Franja fina en el borde inferior izquierdo. Qué la activa (toque, doble toque, mantener, deslizar), en qué direcciones (o «hacia dentro»), distancia mínima y vibración se eligen en Moon > Sistema > Activar con (defecto: toque + deslizar hacia dentro, con vibración). Alto, ancho y altura sobre el borde se cambian tocando las filas de Moon > Sistema > Zona del gesto (defecto 12 / 56 / 0 dp). Si la franja tapa una tecla del teclado, bajar el alto o el ancho; con navegación por gestos puede hacer falta subir "Altura sobre el borde".
 
 ### App
 - Inicio: estado, texto en vivo y onda mientras escucha (igual que el overlay)
@@ -90,3 +90,9 @@ instalada que lo oido no alcanzaba, Moon propone guardar el alias y lo escribe e
 alto y ancho con deslizadores (dp) y restablecer. Prefs `fr_mover`, `fr_oculto` (por defecto si), `fr_alto`, `fr_ancho`,
 `fr_x`, `fr_sube`; se aplican al instante. Con la franja visible, un toque corto tambien abre el overlay.
 La notificacion trae el boton "Hablar".
+
+
+## Otras formas de activar (Moon > Sistema > Otras formas de activar)
+- **Decir «Luna»** (interruptor, apagado por defecto): con él encendido `voz_servidor.py` corre un reconocedor Vosk aparte que solo entiende «luna»; la app consulta `GET /luna?on=1` cada segundo (latido) y abre el overlay cuando sube el contador `n`. Sin latido durante 6 s el vigilante se apaga solo. Se aparta mientras hay una escucha normal o Moon habla. Umbral de confianza `UMBRAL_LUNA` (0.6) y pausa de 3 s tras cada detección.
+- **Botón del auricular** (interruptor, apagado por defecto): sesión multimedia dentro de `EdgeService`; al mantener pulsado el botón Moon vibra, dice «¿Me necesita, señor?» (o una variante) y abre el overlay al terminar de hablar. La pulsación corta se ignora.
+- El servicio `EdgeService` vive mientras esté activa la franja, «Luna» o el auricular; la franja solo se dibuja si «gesto» está activo. Se necesita el permiso de superposición.

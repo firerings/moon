@@ -174,6 +174,30 @@ class MainActivity : Activity() {
         t3.addView(tv("Desbloqueada se ve y se arrastra; al terminar, bloquéala. Oculta es invisible pero sigue funcionando. " +
             "Necesita el gesto de esquina activo.", 12f, c(R.color.moon_muted)).apply { setPadding(0, 0, 0, dp(10)) })
         cont.addView(t3, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
+        val t4 = tarjeta()
+        t4.addView(tv("Activar con", 13f, c(R.color.moon_muted)).apply { setPadding(0, dp(10), 0, dp(2)) })
+        t4.addView(filaSwitch("Toque", "fr_toque", true))
+        t4.addView(filaSwitch("Doble toque", "fr_doble", false))
+        t4.addView(filaSwitch("Mantener pulsado", "fr_largo", false))
+        t4.addView(filaSwitch("Deslizar", "fr_desliza", true))
+        t4.addView(tv("Dirección del deslizamiento", 13f, c(R.color.moon_muted)).apply { setPadding(0, dp(10), 0, dp(2)) })
+        t4.addView(filaSwitch("Hacia dentro de la pantalla", "fr_dir_dentro", true))
+        t4.addView(filaSwitch("Izquierda", "fr_dir_izq", true))
+        t4.addView(filaSwitch("Derecha", "fr_dir_der", true))
+        t4.addView(filaSwitch("Arriba", "fr_dir_arr", true))
+        t4.addView(filaSwitch("Abajo", "fr_dir_aba", true))
+        t4.addView(barra("Distancia mínima", "fr_dist", 40, 15, 200))
+        t4.addView(filaSwitch("Vibrar al activar", "fr_vibra", true))
+        t4.addView(tv("«Hacia dentro» se adapta al borde donde pongas la franja y, si está activo, ignora las direcciones sueltas. " +
+            "Con toque activo, el doble toque no hace falta.", 12f, c(R.color.moon_muted)).apply { setPadding(0, dp(6), 0, dp(10)) })
+        cont.addView(t4, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
+        val t5 = tarjeta()
+        t5.addView(tv("Otras formas de activar", 13f, c(R.color.moon_muted)).apply { setPadding(0, dp(10), 0, dp(2)) })
+        t5.addView(filaSwitch("Decir «Luna»", "luna", false) { asegurarServicio() })
+        t5.addView(filaSwitch("Botón del auricular (mantener)", "auricular", false) { asegurarServicio() })
+        t5.addView(tv("«Luna» mantiene el micrófono escuchando, así que gasta batería: actívalo solo cuando lo uses. " +
+            "El auricular deja de controlar tu música con la pulsación corta mientras esté activo.", 12f, c(R.color.moon_muted)).apply { setPadding(0, dp(6), 0, dp(10)) })
+        cont.addView(t5, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
         val v = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "?" } catch (e: Exception) { "?" }
         verApp = v
         val t2 = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundResource(R.drawable.card_bg); setPadding(dp(16), dp(14), dp(16), dp(16)) }
@@ -208,9 +232,18 @@ class MainActivity : Activity() {
         }
         val on = !prefs.getBoolean("gesto", false)
         prefs.edit().putBoolean("gesto", on).apply()
-        val i = Intent(this, EdgeService::class.java)
-        if (on) startForegroundService(i) else stopService(i)
+        asegurarServicio()
         refrescar()
+    }
+
+    /** El servicio vive mientras esté puesta la franja, «Luna» o el auricular. */
+    private fun asegurarServicio() {
+        val quiere = prefs.getBoolean("gesto", false) || prefs.getBoolean("luna", false) || prefs.getBoolean("auricular", false)
+        if (quiere && !Settings.canDrawOverlays(this)) {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))); return
+        }
+        val i = Intent(this, EdgeService::class.java)
+        if (quiere) startForegroundService(i) else stopService(i)
     }
 
     private fun refrescar() {
@@ -223,7 +256,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (prefs.getBoolean("gesto", false) && Settings.canDrawOverlays(this))
+        if (Settings.canDrawOverlays(this) &&
+            (prefs.getBoolean("gesto", false) || prefs.getBoolean("luna", false) || prefs.getBoolean("auricular", false)))
             startForegroundService(Intent(this, EdgeService::class.java))
         refrescar()
         ui.post(poll)
@@ -402,14 +436,14 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun filaSwitch(t: String, clave: String, def: Boolean = false): LinearLayout {
+    private fun filaSwitch(t: String, clave: String, def: Boolean = false, luego: () -> Unit = {}): LinearLayout {
         var chip: TextView? = null
         fun pinta() {
             val on = prefs.getBoolean(clave, def)
             chip?.text = if (on) "Sí" else "No"
             chip?.setTextColor(c(if (on) R.color.moon_ok else R.color.moon_muted))
         }
-        val (f, ch) = fila(t) { prefs.edit().putBoolean(clave, !prefs.getBoolean(clave, def)).apply(); pinta() }
+        val (f, ch) = fila(t) { prefs.edit().putBoolean(clave, !prefs.getBoolean(clave, def)).apply(); pinta(); luego() }
         chip = ch
         pinta()
         return f

@@ -11,15 +11,31 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.Icon
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import org.json.JSONObject
 import kotlin.math.abs
+import kotlin.math.hypot
 
 /**
- * Franja en la esquina inferior izquierda (configurable). Al deslizar hacia la derecha abre el overlay.
+ * Franja en la esquina inferior izquierda (configurable). Abre el overlay según lo que se active en
+ * Sistema > Activar con: fr_toque, fr_doble, fr_largo, fr_desliza (por defecto toque + deslizar).
+ * Deslizar: fr_dir_dentro (hacia dentro de la pantalla, según el borde donde esté la franja) o, si se
+ * desactiva, fr_dir_izq / fr_dir_der / fr_dir_arr / fr_dir_aba. fr_dist = distancia mínima (dp).
+ * fr_vibra = vibración corta al activar.
+ * «gesto» = la franja está puesta (el servicio también puede vivir solo para Luna o el auricular).
+ * «luna»: consulta al servidor cada segundo (GET /luna?on=1); cuando el contador sube abre el overlay.
+ * «auricular»: sesión multimedia; una pulsación larga del botón saluda por voz y abre el overlay.
  * Preferencias (dp): fr_alto, fr_ancho, fr_x (desde la izquierda), fr_sube (desde abajo).
  * Interruptores: fr_oculto (por defecto si: invisible pero activa; el gesto funciona igual) y
  * fr_mover (desbloqueada: se ve y se arrastra). La franja nunca se quita mientras el servicio corre.
@@ -41,10 +57,24 @@ class EdgeService : Service() {
     private var t0 = 0L
     private var lanzado = false
     private var arrastro = false
+    private var movido = false
+    private var sesion: MediaSession? = null
+    private var vigilando = false
+    private var lunaVista = -1L
+    private var auricLanzado = false
+    private val saludos = listOf(
+        "¿Me necesita, señor?", "A sus órdenes, señor.", "Dígame, señor.",
+        "¿En qué puedo ayudarle, señor?", "Aquí estoy, señor. ¿Qué necesita?", "Estoy atento, señor.")
+    private var ultimoToque = 0L
+    private val h = Handler(Looper.getMainLooper())
+    private val alPulsarLargo = Runnable {
+        if (!lanzado && !movido && panel == null && pr.getBoolean("fr_largo", false)) { lanzado = true; abrir() }
+    }
 
     // SharedPreferences guarda el listener con referencia débil: hay que conservarlo en un campo.
     private val escucha = SharedPreferences.OnSharedPreferenceChangeListener { _, k ->
-        if (k != null && k.startsWith("fr_")) aplicar()
+        if (k != null && (k.startsWith("fr_") || k == "gesto")) aplicar()
+        if (k == "luna" || k == "auricular") extras()
     }
 
     override fun onBind(i: Intent?): IBinder? = null
@@ -62,7 +92,7 @@ class EdgeService : Service() {
         val app = PendingIntent.getActivity(this, 2, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         startForeground(1, Notification.Builder(this, "moon").setSmallIcon(R.drawable.ic_mic)
             .setContentTitle("Moon listo")
-            .setContentText("Desliza a la derecha desde la franja o toca «Hablar»")
+            .setContentText("Usa la franja o toca «Hablar»")
             .setContentIntent(app)
             .addAction(Notification.Action.Builder(Icon.createWithResource(this, R.drawable.ic_mic), "Hablar", abrir).build())
             .build())
@@ -74,6 +104,7 @@ class EdgeService : Service() {
             PixelFormat.TRANSLUCENT).apply { gravity = Gravity.BOTTOM or Gravity.START }
         pr.registerOnSharedPreferenceChangeListener(escucha)
         aplicar()
+        extras()
     }
 
     override fun onStartCommand(i: Intent?, flags: Int, startId: Int): Int {
@@ -85,6 +116,10 @@ class EdgeService : Service() {
     private fun aplicar() {
         val v = esquina ?: return
         val p = lp ?: return
+        if (!pr.getBoolean("gesto", false)) {
+            if (agregada) { try { wm.removeView(v) } catch (e: Exception) {}; agregada = false }
+            return
+        }
         val dm = resources.displayMetrics
         val moviendo = pr.getBoolean("fr_mover", false)
         val visible = moviendo || !pr.getBoolean("fr_oculto", true)
@@ -107,32 +142,149 @@ class EdgeService : Service() {
         val p = lp ?: return true
         val dm = resources.displayMetrics
         val mover = pr.getBoolean("fr_mover", false)
+        val holgura = 12 * d
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                x0 = e.rawX; y0 = e.rawY; lanzado = false; arrastro = false
+                x0 = e.rawX; y0 = e.rawY; lanzado = false; arrastro = false; movido = false
                 px0 = p.x; py0 = p.y; t0 = e.eventTime
+                h.removeCallbacks(alPulsarLargo)
+                if (!mover && pr.getBoolean("fr_largo", false))
+                    h.postDelayed(alPulsarLargo, 500)
             }
-            MotionEvent.ACTION_MOVE ->
+            MotionEvent.ACTION_MOVE -> {
+                val dx = e.rawX - x0; val dy = e.rawY - y0
+                if (abs(dx) > holgura || abs(dy) > holgura) { movido = true; h.removeCallbacks(alPulsarLargo) }
                 if (mover) {
-                    val dx = (e.rawX - x0).toInt(); val dy = (e.rawY - y0).toInt()
                     if (abs(dx) > 6 * d || abs(dy) > 6 * d) arrastro = true
                     if (arrastro) {
-                        p.x = (px0 + dx).coerceIn(0, maxOf(0, dm.widthPixels - p.width))
-                        p.y = (py0 - dy).coerceIn(0, maxOf(0, dm.heightPixels - p.height))
+                        p.x = (px0 + dx.toInt()).coerceIn(0, maxOf(0, dm.widthPixels - p.width))
+                        p.y = (py0 - dy.toInt()).coerceIn(0, maxOf(0, dm.heightPixels - p.height))
                         try { if (agregada) wm.updateViewLayout(esquina, p) } catch (ex: Exception) {}
                     }
-                } else if (!lanzado && panel == null && e.rawX - x0 > 60 * d && abs(e.rawY - y0) < 40 * d) {
-                    lanzado = true; mostrar()
+                } else if (!lanzado && panel == null && pr.getBoolean("fr_desliza", true) &&
+                    hypot(dx, dy) >= pr.getInt("fr_dist", 40).coerceIn(15, 200) * d && direccionValida(dx, dy, p)) {
+                    lanzado = true; abrir()
                 }
-            MotionEvent.ACTION_UP ->
+            }
+            MotionEvent.ACTION_UP -> {
+                h.removeCallbacks(alPulsarLargo)
                 if (mover) {
                     if (arrastro) pr.edit().putInt("fr_x", (p.x / d).toInt()).putInt("fr_sube", (p.y / d).toInt()).apply()
-                } else if (!lanzado && panel == null && !pr.getBoolean("fr_oculto", true) &&
-                    abs(e.rawX - x0) < 12 * d && abs(e.rawY - y0) < 12 * d && e.eventTime - t0 < 400) {
-                    mostrar()   // si la franja se ve, un toque corto también la abre
+                } else if (!lanzado && !movido && panel == null && e.eventTime - t0 < 400) {
+                    if (pr.getBoolean("fr_toque", true)) {
+                        abrir()
+                    } else if (pr.getBoolean("fr_doble", false)) {
+                        if (e.eventTime - ultimoToque < 300) { ultimoToque = 0L; abrir() } else ultimoToque = e.eventTime
+                    }
                 }
+            }
+            MotionEvent.ACTION_CANCEL -> h.removeCallbacks(alPulsarLargo)
         }
         return true
+    }
+
+    /** ¿El deslizamiento va en una dirección permitida? "Hacia dentro" depende del borde donde esté la franja. */
+    private fun direccionValida(dx: Float, dy: Float, p: WindowManager.LayoutParams): Boolean {
+        val dm = resources.displayMetrics
+        val horizontal = abs(dx) >= abs(dy)
+        if (pr.getBoolean("fr_dir_dentro", true)) {
+            val cx = p.x + p.width / 2f
+            val cyDesdeArriba = dm.heightPixels - (p.y + p.height / 2f)
+            return if (horizontal) { if (cx < dm.widthPixels / 2f) dx > 0 else dx < 0 }
+            else { if (cyDesdeArriba < dm.heightPixels / 2f) dy > 0 else dy < 0 }
+        }
+        return if (horizontal) pr.getBoolean(if (dx > 0) "fr_dir_der" else "fr_dir_izq", true)
+        else pr.getBoolean(if (dy < 0) "fr_dir_arr" else "fr_dir_aba", true)
+    }
+
+    /** Abre el overlay por un gesto de la franja, con vibración corta si está activada. */
+    private fun abrir() {
+        vibrar()
+        mostrar()
+    }
+
+    private fun vibrar() {
+        if (!pr.getBoolean("fr_vibra", true)) return
+        try {
+            getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createOneShot(35, VibrationEffect.DEFAULT_AMPLITUDE))
+        } catch (ex: Exception) { /* sin vibrador */ }
+    }
+
+    /** Pone o quita lo que depende de los interruptores «luna» y «auricular». */
+    private fun extras() {
+        auricular()
+        luna()
+    }
+
+    // ---------- palabra «Luna» (la oye el servidor; aquí solo se espera su aviso) ----------
+    private fun luna() {
+        if (!pr.getBoolean("luna", false) || vigilando) return
+        vigilando = true
+        lunaVista = -1L
+        val ctx = applicationContext
+        Thread {
+            while (pr.getBoolean("luna", false)) {
+                val r = Api.call(ctx, "/luna?on=1")
+                val n = try { JSONObject(r ?: "").optLong("n", -1L) } catch (e: Exception) { -1L }
+                if (n >= 0) {
+                    if (lunaVista < 0 || n < lunaVista) lunaVista = n   // primera lectura o servidor reiniciado
+                    else if (n > lunaVista) { lunaVista = n; h.post { if (panel == null) abrir() } }
+                }
+                try { Thread.sleep(1000) } catch (e: InterruptedException) { break }
+            }
+            Api.call(ctx, "/luna?on=0")
+            vigilando = false
+        }.start()
+    }
+
+    // ---------- botón del auricular: pulsación larga ----------
+    private fun auricular() {
+        if (!pr.getBoolean("auricular", false)) {
+            sesion?.let { try { it.isActive = false; it.release() } catch (e: Exception) {} }
+            sesion = null
+            return
+        }
+        if (sesion != null) return
+        Voz.calentar(this)
+        try {
+            val s = MediaSession(this, "MoonAuricular")
+            s.setCallback(object : MediaSession.Callback() {
+                override fun onMediaButtonEvent(i: Intent): Boolean {
+                    @Suppress("DEPRECATION")
+                    val ev = i.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT)
+                    if (ev != null) botonAuricular(ev)
+                    return true
+                }
+            })
+            s.setPlaybackState(PlaybackState.Builder()
+                .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE)
+                .setState(PlaybackState.STATE_PLAYING, 0L, 0f).build())
+            s.isActive = true
+            sesion = s
+        } catch (e: Exception) { sesion = null }
+    }
+
+    private fun botonAuricular(ev: KeyEvent) {
+        val k = ev.keyCode
+        if (k != KeyEvent.KEYCODE_HEADSETHOOK && k != KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE &&
+            k != KeyEvent.KEYCODE_MEDIA_PLAY && k != KeyEvent.KEYCODE_MEDIA_PAUSE) return
+        when (ev.action) {
+            KeyEvent.ACTION_DOWN -> {
+                if (ev.repeatCount == 0) auricLanzado = false
+                if (!auricLanzado && (ev.isLongPress || ev.repeatCount >= 1)) { auricLanzado = true; saludarYAbrir() }
+            }
+            KeyEvent.ACTION_UP -> {
+                if (!auricLanzado && ev.eventTime - ev.downTime >= 600) saludarYAbrir()
+                auricLanzado = false
+            }
+        }
+    }
+
+    /** Vibra, saluda por voz («¿Me necesita, señor?» y variantes) y, al terminar de hablar, abre el overlay. */
+    private fun saludarYAbrir() {
+        if (panel != null) return
+        vibrar()
+        Voz.decirYLuego(this, saludos.random()) { if (panel == null) mostrar() }
     }
 
     private fun mostrar() {
@@ -153,7 +305,10 @@ class EdgeService : Service() {
     }
 
     override fun onDestroy() {
+        h.removeCallbacks(alPulsarLargo)
         pr.unregisterOnSharedPreferenceChangeListener(escucha)
+        sesion?.let { try { it.isActive = false; it.release() } catch (e: Exception) {} }
+        sesion = null
         cerrar()
         esquina?.let { if (agregada) { try { wm.removeView(it) } catch (e: Exception) {} } }
         agregada = false
