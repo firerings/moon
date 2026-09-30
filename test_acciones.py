@@ -8,10 +8,11 @@ os.environ["MOON_LOGDIR"] = os.path.join(tmp, "MoonLogs")
 AQUI = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, AQUI)
 import acciones
-acciones.DIR = tmp
+from cerebro import config as cfg      # las constantes viven en cerebro.config
+cfg.DIR = tmp
 shutil.copy(os.path.join(AQUI, "comandos.json"), tmp)
-acciones.ESPERA_RESPUESTA = 0.4
-acciones.ESPERA_ACK = 0.4
+cfg.ESPERA_RESPUESTA = 0.4
+cfg.ESPERA_ACK = 0.4
 
 nlu = None
 try:
@@ -74,7 +75,7 @@ env = {"enviar": enviar, "app_activa": lambda: ACC["activa"], "servida": lambda 
        "reiniciar": reiniciar, "iniciar": iniciar, "parar": parar,
        "escuchando": lambda: S["esc"], "bateria": lambda: S["bat"]}
 c = acciones.Cerebro(nlu, env)
-acciones.COLA_TTS = 0
+cfg.COLA_TTS = 0
 fallos = 0
 
 
@@ -168,7 +169,7 @@ chequear("voz: app conectada -> habla la app, no Termux", S["nativo"] == 1 and S
 ACC["modo_voz"] = "falla"; S["nativo"] = S["tts"] = 0
 c.hablar("Prueba dos")
 chequear("voz: la app no tiene voz -> respaldo Termux", S["tts"] == 1)
-ACC["modo_voz"] = "no_recoge"; acciones.ESPERA_ENTREGA = 0.3; S["tts"] = 0
+ACC["modo_voz"] = "no_recoge"; cfg.ESPERA_ENTREGA = 0.3; S["tts"] = 0
 t0 = time.time(); c.hablar("Prueba tres")
 chequear("voz: la app no recoge la frase -> Termux en menos de 1 s", S["tts"] == 1 and time.time() - t0 < 1)
 ACC["activa"] = False; ACC["modo_voz"] = "ok"; S["nativo"] = S["tts"] = 0
