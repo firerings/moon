@@ -213,8 +213,11 @@ lock = threading.Lock()
 parar = threading.Event()
 
 
-def preparar_audio():
+def preparar_audio(limpio=False):
     subprocess.run(["pkill", "parec"])      # restos de un servidor anterior que murió sin cerrar su captura
+    if limpio:                               # arranque: un PulseAudio atascado (p. ej. tras una llamada) no se arregla con --start
+        subprocess.run(["pulseaudio", "-k"])
+        time.sleep(PAUSA_RESET)
     subprocess.run(["pulseaudio", "--start", "--exit-idle-time=-1"])
     fuentes = subprocess.run(["pactl", "list", "short", "sources"],
                              capture_output=True, text=True).stdout
@@ -269,8 +272,15 @@ def leer_audio(p, tope):
     return os.read(p.stdout.fileno(), 3200)
 
 
-def reiniciar_audio():
-    """Ultimo recurso con el microfono colgado: reinicia PulseAudio y su fuente OpenSL."""
+AUDIO_RESET = {"t": 0.0}  # ultima vez que se reinicio PulseAudio
+MIN_ENTRE_RESETS = 20.0   # s minimos entre dos reinicios de PulseAudio (con una llamada en curso no sirve de nada repetir)
+
+
+def reiniciar_audio(minimo=0.0):
+    """Reinicia PulseAudio y su fuente OpenSL (cura el microfono colgado). `minimo`: no lo repite antes de esos s."""
+    if time.time() - AUDIO_RESET["t"] < minimo:
+        return
+    AUDIO_RESET["t"] = time.time()
     subprocess.run(["pulseaudio", "-k"])
     time.sleep(PAUSA_RESET)
     preparar_audio()
@@ -381,8 +391,8 @@ def trabajador():
 
 def _recuperar_audio(fallos):
     """Tras un fallo de captura: espera creciente y reinicia PulseAudio cada pocos fallos seguidos."""
-    if fallos % REINTENTOS_AUDIO == 0:
-        reiniciar_audio()
+    if fallos == 1 or fallos % REINTENTOS_AUDIO == 0:    # desde el primer fallo: antes las sesiones acababan sin llegar
+        reiniciar_audio(MIN_ENTRE_RESETS)
     else:
         parar.wait(1.0)
     if fallos > REINTENTOS_AUDIO:
@@ -514,16 +524,39 @@ def _es_luna(res):
     return any(w.get("word") == "luna" and w.get("conf", 1.0) >= UMBRAL_LUNA for w in (res.get("result") or []))
 
 
+def luna_llamada(en):
+    """La app avisa si el teléfono está en llamada. Durante ella Luna no abre el micrófono; al colgar se quita
+    la pausa fija y se limpia PulseAudio una sola vez (lo hace el hilo de Luna) para volver a oír al instante."""
+    antes = LUNA.get("llamada", False)
+    LUNA["llamada"] = en
+    if en and not antes:
+        acciones.log_evento({"tipo": "llamada_detectada"})
+    elif antes and not en:
+        LUNA["pausa_hasta"] = 0.0
+        LUNA["reiniciar"] = True
+        acciones.log_evento({"tipo": "llamada_terminada"})
+
+
+def pausar_luna(segundos):
+    """Luna no abre el microfono durante `segundos` (p. ej. al marcar una llamada: el telefono lo necesita)."""
+    LUNA["pausa_hasta"] = time.time() + max(0.0, segundos)
+
+
 def _sesion_luna(rec):
+    """Una pasada de vigilancia. Devuelve None si fue normal, o por qué falló el audio."""
     p = lanzar_parec()
+    sin = time.time()
     try:
         rec.Reset()
         while time.time() - LUNA["visto"] < 6 and not E["escuchando"] and not CEREBRO.callando():
             data = leer_audio(p, 0.5)
             if data is None:
+                if time.time() - sin > SIN_AUDIO:       # microfono mudo (llamada en curso o PulseAudio atascado)
+                    return "sin_audio"
                 continue
             if not data:
-                break
+                return "parec_cerrado"
+            sin = time.time()
             if rec.AcceptWaveform(data):
                 res = json.loads(rec.Result())
                 if _es_luna(res):
@@ -531,12 +564,13 @@ def _sesion_luna(rec):
                         LUNA["t"] = time.time()
                         LUNA["n"] += 1
                         acciones.log_evento({"tipo": "luna_oida"})
-                        return
+                        return None
                 elif "luna" in (res.get("text") or "").split():
                     acciones.log_evento({"tipo": "luna_descartada", "texto": res.get("text"),
                                          "conf": [w.get("conf") for w in (res.get("result") or [])]})
     finally:
         cerrar_parec(p)
+    return None
 
 
 def vigilar_luna():
@@ -546,11 +580,31 @@ def vigilar_luna():
         except Exception:
             rec = KaldiRecognizer(model, 16000)
         rec.SetWords(True)
+        fallos = 0
         while time.time() - LUNA["visto"] < 6:
-            if E["escuchando"] or CEREBRO.callando():
+            if LUNA.get("llamada"):                  # en llamada: el teléfono tiene el micrófono
                 time.sleep(0.3)
                 continue
-            _sesion_luna(rec)
+            if LUNA.pop("reiniciar", False):         # acaba de colgar: una limpieza y a oír
+                reiniciar_audio()
+                fallos = 0
+            if E["escuchando"] or CEREBRO.callando() or time.time() < LUNA.get("pausa_hasta", 0.0):
+                time.sleep(0.3)
+                continue
+            fallo = _sesion_luna(rec)
+            if fallo:
+                # Antes Luna se quedaba esperando para siempre un parec muerto (tras una llamada) y el microfono no volvia.
+                fallos += 1
+                DIAG["audio_fallos"] += 1
+                DIAG["audio_ultimo_fallo"] = time.time()
+                acciones.log_evento({"tipo": "audio_sin_datos", "donde": "luna", "motivo": fallo, "intento": fallos})
+                if fallos == 1 or fallos % REINTENTOS_AUDIO == 0:
+                    reiniciar_audio(MIN_ENTRE_RESETS)
+                fin = time.time() + min(20.0, 1.0 + 2.0 * fallos)
+                while time.time() < fin and time.time() - LUNA["visto"] < 6 and not E["escuchando"]:
+                    time.sleep(0.3)
+            else:
+                fallos = 0
             time.sleep(0.2)
     except Exception as e:
         acciones.log_evento({"tipo": "error", "donde": "luna", "detalle": str(e)})
@@ -625,6 +679,9 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/luna":
             if parse_qs(u.query).get("on", ["0"])[0] == "1":
                 LUNA["visto"] = time.time()
+                ll = parse_qs(u.query).get("llamada", [None])[0]
+                if ll is not None:                   # la app dice si hay llamada en curso
+                    luna_llamada(ll == "1")
                 with lock:
                     nuevo = not LUNA["hilo"]
                     LUNA["hilo"] = True
@@ -632,6 +689,7 @@ class H(BaseHTTPRequestHandler):
                     threading.Thread(target=vigilar_luna, daemon=True).start()
             else:
                 LUNA["visto"] = 0.0
+                LUNA["llamada"] = False
             self._j({"n": LUNA["n"], "activo": LUNA["hilo"]})
         elif u.path == "/sistema":
             self._j({"shizuku": shizuku_activo(), "modelo": modelo_corto()})
@@ -764,7 +822,7 @@ class H(BaseHTTPRequestHandler):
         pass
 
 
-preparar_audio()
+preparar_audio(limpio=True)
 print("Cargando modelo...", flush=True)
 model = Model(MODEL)
 try:
@@ -778,7 +836,7 @@ CEREBRO = acciones.Cerebro(NLU_MODELO, {
     "ui": guardar, "reiniciar": reiniciar_conexion, "iniciar": iniciar_escucha,
     "enviar": enviar_accion, "app_activa": app_activa,
     "servida": accion_servida, "cancelar": marcar_ack,
-    "parar": parar_escucha, "escuchando": esta_escuchando})
+    "parar": parar_escucha, "escuchando": esta_escuchando, "pausar_audio": pausar_luna})
 CEREBRO.iniciar()
 threading.Thread(target=trabajador, daemon=True).start()
 print("Token:", TOKEN, flush=True)

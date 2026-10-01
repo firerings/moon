@@ -197,7 +197,14 @@ class LlamadasMixin:
 
     def _marcar(self, c, q, aprender=False):
         nombre = self._nombre_corto(c)
+        # El telefono va a tomar el microfono: Luna no debe abrirlo justo ahora (se quedaba colgado al acabar la llamada).
+        pausar = self.env.get("pausar_audio")
+        if pausar:
+            pausar(cfg.PAUSA_AUDIO_LLAMADA)
         r = self._pedir_app({"tipo": "llamar", "cid": c["i"], "nombre": nombre}, cfg.ESPERA_ORDEN_APP + 1)
+        if r is None or not r["ok"]:
+            if pausar:
+                pausar(0)                       # no hubo llamada: Luna vuelve a oir
         if r is None:
             log_evento({"tipo": "llamada", "ok": False, "motivo": "app_no_disponible", "contacto_id": c["i"]})
             return "La app Moon no está abierta, no puedo marcar"
@@ -208,4 +215,5 @@ class LlamadasMixin:
         if aprender and c.get("via") != "alias" and c.get("score", 1.0) < 0.95:
             self._guardar_alias_contacto(q, c["i"])
         log_evento({"tipo": "llamada", "ok": True, "contacto_id": c["i"], "score": c.get("score")})
-        return "Llamando a %s" % nombre
+        # La pantalla de llamada toma el audio y corta la voz: por defecto no se dice nada (cfg.DECIR_LLAMANDO).
+        return "Llamando a %s" % nombre if cfg.DECIR_LLAMANDO else ""

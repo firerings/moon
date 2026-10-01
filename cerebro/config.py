@@ -20,4 +20,6 @@ REVISION_BATERIA = 120      # cada cuantos segundos mira la bateria
 ESPERA_ORDEN_APP = 2.5      # segundos que se espera a que la app Moon ejecute linterna/bateria/llamada
 UMBRAL_CONTACTO = 0.72      # parecido minimo (de sonido) para proponer un contacto
 UMBRAL_DIRECTO = 0.9        # parecido a partir del cual se llama sin preguntar (si la confirmacion esta apagada)
+DECIR_LLAMANDO = False      # True: Moon dice «Llamando a X» tras marcar (la pantalla de llamada suele cortarlo)
+PAUSA_AUDIO_LLAMADA = 25    # s que Luna no abre el microfono tras marcar una llamada
 MAX_CANDIDATOS = 3          # contactos parecidos que se proponen, uno a uno

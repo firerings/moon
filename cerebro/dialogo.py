@@ -34,15 +34,29 @@ class DialogoMixin:
           nadie     funcion: «No llamar a nadie» (cierra todo sin pasar al siguiente)."""
         p = {"si": si, "no": no, "intentos": 0, "auto": False, "espera": espera or cfg.ESPERA_RESPUESTA,
              "id": os.urandom(3).hex(), "texto": pregunta, "extra": dict(extra or {}),
-             "elegir": dict(elegir or {}), "descartar": descartar, "nadie": nadie}
+             "elegir": dict(elegir or {}), "descartar": descartar, "nadie": nadie, "visible": False}
         with self._lock:
             self.pendiente = p
         log_evento({"tipo": "pregunta", "texto": pregunta})
-        self.hablar(pregunta)
+        # La pregunta se dice en otro hilo: así no se queda el candado (`self._lock`) tomado mientras Moon habla
+        # y un toque en ✓ se resuelve al instante en vez de esperar a que termine la frase.
+        threading.Thread(target=self._decir_pregunta, args=(p,), daemon=True).start()
+
+    def _decir_pregunta(self, p):
+        """Dice la pregunta; la tarjeta sale justo cuando empieza la voz (`visible`), no antes."""
+        def ver():
+            p["visible"] = True
+        try:
+            self.hablar(p["texto"], ver)
+        finally:
+            p["visible"] = True
+        if self.pendiente is not p:              # ya la respondieron (toque) mientras hablaba
+            return
         if not self.env["escuchando"]():
             p["auto"] = True
             self.env["iniciar"](True)
-        self._armar(p)
+        if self.pendiente is p:
+            self._armar(p)
 
     def _armar(self, p):
         if p.get("timer"):
@@ -62,7 +76,7 @@ class DialogoMixin:
         """Lo que la app necesita para dibujar la tarjeta Sí/No, o None si no hay pregunta abierta.
         Se lee sin tomar el candado: /estado se consulta cada 350 ms y no debe esperar a que Moon termine de hablar."""
         p = self.pendiente
-        if not p:
+        if not p or not p.get("visible", True):
             return None
         restante = max(0.0, p["espera"] - (time.time() - p.get("t_arma", time.time())))
         return {"id": p["id"], "texto": p["texto"], "restante": round(restante, 1),

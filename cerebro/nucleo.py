@@ -40,7 +40,7 @@ def _ejecutar_rish(cmd, timeout=10):
 
 
 def _tts_termux(texto):
-    subprocess.run(["termux-tts-speak", "-l", "es", texto], timeout=40)
+    subprocess.run(["termux-tts-speak", "-l", "es", texto], timeout=12)
 
 
 class Cerebro(VozMixin, DialogoMixin, AppsMixin, SistemaMixin, LlamadasMixin):

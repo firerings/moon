@@ -13,6 +13,7 @@ cfg.DIR = tmp
 shutil.copy(os.path.join(AQUI, "comandos.json"), tmp)
 cfg.ESPERA_RESPUESTA = 0.4
 cfg.ESPERA_ACK = 0.4
+cfg.DECIR_LLAMANDO = True      # las pruebas viejas comprueban la frase; abajo hay una con el valor por defecto (False)
 
 nlu = None
 try:
@@ -57,7 +58,7 @@ def enviar(a):
             ACC["entregadas"].add(i)
             if ACC["modo_voz"] == "ok":
                 S["dicho"].append(a["texto"]); S["nativo"] += 1
-            threading.Timer(0.02, lambda: c.resultado_app(i, ACC["modo_voz"] == "ok")).start()
+            threading.Timer(ACC.get("demora", 0.02), lambda: c.resultado_app(i, ACC["modo_voz"] == "ok")).start()
         # modo "no_recoge": la app no la recibe nunca
     elif a["tipo"] in ("linterna", "bateria", "llamar"):
         ACC["pedidas"].append(a)
@@ -75,7 +76,8 @@ def tts(t):
 
 
 S.update(nativo=0, tts=0)
-env = {"enviar": enviar, "app_activa": lambda: ACC["activa"], "servida": lambda i: i in ACC["entregadas"],
+PAUSAS = []
+env = {"pausar_audio": PAUSAS.append, "enviar": enviar, "app_activa": lambda: ACC["activa"], "servida": lambda i: i in ACC["entregadas"],
        "cancelar": lambda i: None, "rish": rish, "tts": tts,
        "ui": lambda d: S["ui"].append(d),
        "reiniciar": reiniciar, "iniciar": iniciar, "parar": parar,
@@ -91,9 +93,22 @@ def chequear(nombre, cond):
     fallos += 0 if cond else 1
 
 
+def asentar(cer=None, t=2.0):
+    """La pregunta Sí/No se dice en otro hilo (para no tener el candado tomado): espera a que termine de
+    decirse y quede armada, como lo vería quien habla."""
+    cer = cer or c
+    fin = time.time() + t
+    while time.time() < fin:
+        p = cer.pendiente
+        if p is None or "t_arma" in p:
+            return
+        time.sleep(0.01)
+
+
 def dice(t):
     S["dicho"].clear(); S["rish"][:] = [x for x in S["rish"] if x.startswith("pm list")]
     c.procesar(t)
+    asentar()
     return S["dicho"][-1] if S["dicho"] else None
 
 
@@ -183,21 +198,21 @@ c.hablar("Prueba cuatro")
 chequear("voz: app desconectada -> Termux directo", S["tts"] == 1 and S["nativo"] == 0)
 
 # --- si / no ---
-S["dicho"].clear(); S["bat"] = (15, False); c.revisar_bateria(S["bat"])
+S["dicho"].clear(); S["bat"] = (15, False); c.revisar_bateria(S["bat"]); asentar()
 chequear("batería baja: pregunta y abre el micrófono", "modo ahorro" in S["dicho"][-1] and S["esc"] and c.pendiente)
 c.procesar("sí, claro")
 chequear("respuesta 'sí' activa ahorro y cierra el micrófono", c.ahorro and not S["esc"] and not c.pendiente and S["dicho"][-1] == "Modo ahorro activado")
-c.ahorro = False; c.bateria_preguntada = False; c.revisar_bateria((15, False))
+c.ahorro = False; c.bateria_preguntada = False; c.revisar_bateria((15, False)); asentar()
 c.procesar("negativo")
 chequear("respuesta 'negativo' no activa nada", not c.ahorro and S["dicho"][-1] == "Está bien, sigo normal")
-c.revisar_bateria((14, False))
+c.revisar_bateria((14, False)); asentar()
 chequear("no vuelve a preguntar en la misma descarga", not c.pendiente)
-c.revisar_bateria((50, False)); c.revisar_bateria((15, False))
+c.revisar_bateria((50, False)); c.revisar_bateria((15, False)); asentar()
 c.procesar("mmm quizas"); c.procesar("bueno")
 chequear("respuesta ininteligible dos veces -> cancela", not c.pendiente and S["dicho"][-1] == "No te entendí, lo dejo así")
-c.bateria_preguntada = False; c.revisar_bateria((15, False)); time.sleep(0.8)
+c.bateria_preguntada = False; c.revisar_bateria((15, False)); time.sleep(0.8); asentar()
 chequear("sin respuesta -> expira y cierra micrófono", not c.pendiente and not S["esc"] and S["dicho"][-1].startswith("No te escuché"))
-c.revisar_bateria((15, True))
+c.revisar_bateria((15, True)); asentar()
 chequear("cargando -> no pregunta", not c.pendiente)
 
 # --- ahorro y silencio ---
@@ -218,7 +233,7 @@ chequear("«gracias» dentro de otra frase no cierra: ejecuta la orden", S["esc"
 S["esc"] = False; S["bat"] = (15, False); c.revisar_bateria(S["bat"])
 n1 = c.n_ordenes; c.procesar("no")
 chequear("responder una pregunta marca el fin de orden", c.n_ordenes > n1 and not c.pendiente)
-c.bateria_preguntada = False; c.revisar_bateria((50, False)); S["esc"] = False
+c.bateria_preguntada = False; c.revisar_bateria((50, False)); S["esc"] = False; asentar()
 
 # --- linterna y batería por la app Moon (respaldo: Termux) ---
 import subprocess
@@ -349,6 +364,31 @@ chequear("lista: ✕ en una fila la quita y la pregunta se rearma sin ella",
 v = c.vista_pregunta()
 chequear("lista: «No llamar a nadie» cierra todo sin llamar ni proponer el siguiente",
          c.responder_toque("nadie", v["id"]) and esperar(lambda: c.pendiente is None and not S["esc"]) and not ACC["pedidas"])
+
+
+# ---- llamada silenciosa + Luna en pausa mientras el teléfono toma el micrófono ----
+cfg.DECIR_LLAMANDO = False; ACC["activa"] = True; ACC["pedidas"].clear(); PAUSAS.clear()
+dice("llama a daniel"); S["dicho"].clear(); dice("si")
+chequear("llamada silenciosa: marca y no dice «Llamando a...» (la pantalla de llamada lo cortaba)",
+         ACC["pedidas"] and ACC["pedidas"][-1]["cid"] == "1" and not any(x.startswith("Llamando") for x in S["dicho"]))
+chequear("llamada: Luna se pausa antes de marcar y no se libera si la llamada salió", PAUSAS and PAUSAS[0] == cfg.PAUSA_AUDIO_LLAMADA and PAUSAS[-1] != 0)
+ACC["resp"]["llamar"] = (False, None); PAUSAS.clear()
+dice("llama a daniel"); dice("si")
+chequear("llamada que falla: Luna vuelve a oír (pausa a 0) y el error se dice", PAUSAS and PAUSAS[-1] == 0 and S["dicho"] and S["dicho"][-1].startswith("No pude llamar"))
+ACC["resp"].pop("llamar", None); cfg.DECIR_LLAMANDO = True
+
+# ---- rapidez: el toque ✓ no espera a que Moon termine de decir la pregunta, y la tarjeta sale con la voz ----
+ACC["pedidas"].clear(); ACC["demora"] = 1.5          # la pregunta tarda 1,5 s en decirse
+t0 = time.time(); c.procesar("llama a daniel")
+chequear("rapidez: procesar() vuelve al instante, sin esperar a que se diga la pregunta", time.time() - t0 < 0.5)
+chequear("rapidez: la tarjeta sale cuando empieza la voz, no antes ni mucho después",
+         esperar(lambda: c.vista_pregunta() is not None, 1.0) and S["dicho"] and S["dicho"][-1] == "¿Llamo a Daniel Lopez?")
+v = c.vista_pregunta(); t1 = time.time()
+c.responder_toque("si", v["id"])
+chequear("rapidez: ✓ mientras Moon aún habla marca al instante",
+         esperar(lambda: ACC["pedidas"] and ACC["pedidas"][-1]["cid"] == "1", 1.0) and time.time() - t1 < 1.0)
+ACC["demora"] = 0.02
+esperar(lambda: c.pendiente is None and not S["esc"])
 
 cfg.ESPERA_RESPUESTA = 0.4
 ACC["activa"] = False

@@ -9,26 +9,32 @@ from .util import log_evento
 
 class VozMixin:
     # ---------- voz ----------
-    def hablar(self, texto):
+    def hablar(self, texto, al_servir=None):
         """Voz de la app Moon (motor de Android ya arrancado, casi instantanea) si esta conectada;
-        si no, termux-tts-speak (tarda varios segundos en arrancar)."""
+        si no, termux-tts-speak (tarda varios segundos en arrancar).
+        `al_servir` (opcional) se llama justo cuando la voz va a empezar a sonar (la app recogio la frase o
+        arranca Termux); la tarjeta Si/No lo usa para salir en el mismo momento que la pregunta hablada."""
         if not texto:
             return
         with self._tts_lock:
             self._mudo = True
             via, error = "app", None
             try:
-                if not self._decir_app(texto):
+                if not self._decir_app(texto, al_servir):
                     via = "termux"
+                    if al_servir:
+                        al_servir()
                     self.tts(texto)
             except Exception as e:
                 error = str(e)
             finally:
+                if al_servir:
+                    al_servir()                  # pase lo que pase, que la tarjeta no se quede oculta
                 self._mudo_hasta = time.time() + cfg.COLA_TTS
                 self._mudo = False
         log_evento({"tipo": "habla", "texto": texto, "via": via, **({"error": error} if error else {})})
 
-    def _decir_app(self, texto):
+    def _decir_app(self, texto, al_servir=None):
         env = self.env
         if not (env.get("app_activa") and env["app_activa"]() and env.get("enviar")):
             return False
@@ -42,6 +48,8 @@ class VozMixin:
                     env["cancelar"](i)
                     return False
                 time.sleep(0.05)
+            if al_servir:
+                al_servir()
             h["ev"].wait(min(15.0, 2.0 + 0.09 * len(texto)))   # hasta que termine de hablar
             return h["ok"] is not False
         finally:
