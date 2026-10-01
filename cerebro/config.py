@@ -10,6 +10,7 @@ LOGDIR = os.environ.get("MOON_LOGDIR", "/storage/emulated/0/Download/MoonLogs")
 UMBRAL_INTENT = 0.55        # confianza minima del NLU
 ESPERA_RESPUESTA = 15       # segundos que Moon espera un si/no
 SILENCIO_AUTO = None        # None = la escucha nunca se cierra por silencio (antes 20 s: se apagaba sola)
+FRASES_CIERRE = {"ya esta", "gracias", "muchas gracias", "descansa", "eso es todo", "ya esta gracias", "listo gracias"}   # cierran la escucha (frase completa)
 COLA_TTS = 0.9              # segundos de "oido apagado" tras hablar (evita oirse a si mismo)
 ESPERA_ENTREGA = 1.5        # segundos para que la app Moon recoja una frase a decir
 ESPERA_ACK = 4              # segundos que se espera a que la app Moon confirme

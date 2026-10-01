@@ -116,6 +116,7 @@ class DialogoMixin:
                 reg.update(ok=False, motivo="respuesta_no_entendida")
                 log_evento(reg)
                 self.hablar("No te entendí, lo dejo así")
+                self.fin_orden()
                 return self._cerrar_auto(p)
             log_evento(reg)
             self.hablar("¿Sí o no?")
@@ -126,6 +127,7 @@ class DialogoMixin:
             self.hablar((p["si"] if r == "si" else p["no"])())
         finally:
             if self.pendiente is None:
+                self.fin_orden()
                 self._cerrar_auto(p)
             elif p.get("auto"):
                 self.pendiente["auto"] = True      # la respuesta abrio otra pregunta: hereda el cierre de la escucha
@@ -137,6 +139,7 @@ class DialogoMixin:
             self.pendiente = None
         log_evento({"tipo": "pregunta_expirada"})
         self.hablar("No te escuché, lo dejo así")
+        self.fin_orden()
         self._cerrar_auto(p)
 
     def _cerrar_auto(self, p):

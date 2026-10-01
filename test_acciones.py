@@ -204,6 +204,22 @@ chequear("cargando -> no pregunta", not c.pendiente)
 c.ahorro = False
 chequear("límite de silencio: sin límite ni en ahorro", c.limite_silencio() is None and (setattr(c, "ahorro", True) or c.limite_silencio() is None))
 
+# --- sesión «un comando por Luna»: fin de orden y frases de cierre ---
+c.ahorro = False; c.bateria_preguntada = False; c.pendiente = None
+n0 = c.n_ordenes
+dice("que hora es")
+chequear("una orden ejecutada marca el fin de orden", c.n_ordenes > n0 and time.time() - c.t_orden < 2)
+S["esc"] = True; c.procesar("gracias")
+chequear("«gracias» (frase entera) cierra la escucha", not S["esc"])
+S["esc"] = True; c.procesar("ya está")
+chequear("«ya está» cierra la escucha", not S["esc"])
+S["esc"] = True; dice("que hora es gracias")
+chequear("«gracias» dentro de otra frase no cierra: ejecuta la orden", S["esc"])
+S["esc"] = False; S["bat"] = (15, False); c.revisar_bateria(S["bat"])
+n1 = c.n_ordenes; c.procesar("no")
+chequear("responder una pregunta marca el fin de orden", c.n_ordenes > n1 and not c.pendiente)
+c.bateria_preguntada = False; c.revisar_bateria((50, False)); S["esc"] = False
+
 # --- linterna y batería por la app Moon (respaldo: Termux) ---
 import subprocess
 cfg.ESPERA_ORDEN_APP = 0.6

@@ -158,3 +158,5 @@ Moon > Sistema > Versión y actualizaciones: dos semáforos y el botón **Buscar
 - Probar: «llama a daniel» con varios parecidos (lista, ✓ en la fila 2, ✕, «No llamar a nadie»), la pregunta de batería sin overlay abierto, y la tarjeta encima de otra app.
 - Probar «Buscar actualizaciones» con datos y sin datos (debe decir «No pude comprobar»). Si GitHub da 404: el repositorio no es público o no hay releases.
 - El servidor debe estar en un repositorio git con remoto (`git branch -u origin/main`) para que el semáforo del servidor vea los cambios por bajar.
+
+- **Un comando por «Luna»:** la sesión abierta por «Luna» o por el auricular se cierra sola y Luna vuelve a esperar: a los 8 s sin hablar (`ESPERA_UNO`), 1.5 s después de ejecutar una orden (`CIERRE_UNO`) o al decir «ya está», «gracias» o «descansa» (frase completa, `FRASES_CIERRE`). Si Moon pregunta algo de sí/no, espera la respuesta antes de cerrar. Al cerrar vibra. El gesto de esquina y «Hablar» no se cierran solos. El servidor lo decide (`/escuchar?uno=1`); la app cierra el overlay cuando `/estado` dice `escuchando: false`.

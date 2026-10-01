@@ -106,10 +106,10 @@ class EdgeService : Service() {
     private fun saludarYAbrir() {
         if (panel != null) return
         vibrar()
-        Voz.decirYLuego(this, saludos.random()) { if (panel == null) mostrar() }
+        Voz.decirYLuego(this, saludos.random()) { if (panel == null) mostrar(true) }
     }
 
-    private fun mostrar() {
+    private fun mostrar(uno: Boolean = false) {
         if (panel != null) return
         val p = OverlayPanel(this)
         panel = p
@@ -118,11 +118,11 @@ class EdgeService : Service() {
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT)
         wm.addView(p.view, lpp)
-        p.start()
+        p.start(uno)
     }
 
     private fun cerrar() {
-        panel?.let { it.stop(); try { wm.removeView(it.view) } catch (e: Exception) {} }
+        panel?.let { if (it.uno) vibrar(); it.stop(); try { wm.removeView(it.view) } catch (e: Exception) {} }
         panel = null
     }
 

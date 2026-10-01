@@ -47,6 +47,11 @@ class VozMixin:
         finally:
             self._habla.pop(i, None)
 
+    def fin_orden(self):
+        """Una orden (o su pregunta) terminó y Moon ya habló: la sesión «un comando por Luna» puede cerrarse."""
+        self.n_ordenes += 1
+        self.t_orden = time.time()
+
     def callando(self):
         """El bucle de audio descarta lo que oye mientras Moon habla."""
         return self._mudo or time.time() < self._mudo_hasta

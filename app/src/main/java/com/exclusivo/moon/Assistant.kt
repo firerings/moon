@@ -43,6 +43,8 @@ class OverlayPanel(private val ctx: Context) {
     private var seq = 0
     private var ultimo = ""
     private var ocupado = false
+    var uno = false                 // sesión «un comando» (Luna / auricular): se cierra cuando el servidor deja de escuchar
+    private var vioEsc = false
     private val titulo = view.findViewById<TextView>(R.id.ovTitulo)
     private val texto = view.findViewById<TextView>(R.id.ovTexto)
     private val pEscucha = view.findViewById<View>(R.id.ovEscucha)
@@ -63,14 +65,15 @@ class OverlayPanel(private val ctx: Context) {
         view.findViewById<View>(R.id.ovStop).setOnClickListener { onClose?.invoke() }
     }
 
-    fun start() {
+    fun start(uno: Boolean = false) {
+        this.uno = uno; vioEsc = false
         seq = 0; ultimo = ""
         Tarjeta.oyente(alTarjeta)
         Tarjeta.panel(ctx.applicationContext, true)
         view.visibility = if (Tarjeta.activa) View.INVISIBLE else View.VISIBLE
         titulo.text = "Escuchando"; texto.text = ""
         pEscucha.visibility = View.VISIBLE; pOrden.visibility = View.GONE
-        Thread { Api.call(ctx, "/escuchar", "POST") }.start()
+        Thread { Api.call(ctx, if (uno) "/escuchar?uno=1" else "/escuchar", "POST") }.start()
         ui.post(poll)
     }
 
@@ -104,6 +107,11 @@ class OverlayPanel(private val ctx: Context) {
         }
         val j = try { JSONObject(r) } catch (e: Exception) { return }
         if (j.has("auth")) { error("Token incorrecto", "Revísalo en Moon, pestaña Sistema"); return }
+        if (j.getBoolean("escuchando")) vioEsc = true
+        else if (uno && vioEsc) {            // el servidor cerró la sesión: se cierra el overlay (salvo que muestre una orden en curso)
+            val o = j.optJSONObject("orden")
+            if (o == null || o.getBoolean("hecho")) { onClose?.invoke(); return }
+        }
         if (j.getInt("total") < seq) seq = 0
         val fin = j.getJSONArray("finales")
         for (i in 0 until fin.length()) { val f = fin.getJSONObject(i); seq = maxOf(seq, f.getInt("n")); ultimo = f.getString("t") }

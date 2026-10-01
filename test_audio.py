@@ -123,6 +123,25 @@ ok(espera(solo_escucha, 4), "al escuchar, Luna suelta su parec y queda uno solo"
 req("/parar", "POST"); req("/luna?on=0")
 ok(limpio(), "al apagar Luna y parar no queda nada")
 
+# 8. sesión «un comando por Luna» (/escuchar?uno=1)
+vs.ESPERA_UNO = 1.0; vs.CIERRE_UNO = 0.3; modo("audio")
+req("/escuchar?uno=1", "POST")
+ok(espera(escuchando, 2), "uno: arranca escuchando")
+ok(espera(lambda: not escuchando(), 5), "uno: sin hablar se cierra solo por silencio")
+ok(any(e.get("motivo") == "silencio" for e in eventos("sesion_cerrada")), "uno: anota el motivo (silencio)")
+req("/escuchar?uno=1", "POST"); espera(escuchando, 2)
+vs.CEREBRO.fin_orden()
+ok(espera(lambda: not escuchando(), 4), "uno: tras una orden se cierra enseguida")
+ok(any(e.get("motivo") == "orden" for e in eventos("sesion_cerrada")), "uno: anota el motivo (orden)")
+vs.CEREBRO.pendiente = {"id": "x", "texto": "t", "espera": 15, "extra": {}, "t_arma": time.time()}
+req("/escuchar?uno=1", "POST"); time.sleep(2.5)
+ok(escuchando(), "uno: con una pregunta sí/no abierta no cierra por silencio")
+vs.CEREBRO.pendiente = None
+ok(espera(lambda: not escuchando(), 4), "uno: al resolverse la pregunta vuelve a contar y cierra")
+req("/escuchar", "POST"); time.sleep(2.5)
+ok(escuchando(), "manual (Hablar / gesto): sin límite, sigue abierta")
+req("/parar", "POST"); ok(limpio(), "manual: /parar la cierra")
+
 # 7. apagado limpio (SIGTERM): no deja parec huerfanos
 req("/escuchar", "POST"); espera(lambda: vs.AUDIO["p"] is not None); p = vs.AUDIO["p"]
 salidas = []; real = os._exit; os._exit = lambda c: salidas.append(c)

@@ -58,6 +58,8 @@ class Cerebro(VozMixin, DialogoMixin, AppsMixin, SistemaMixin, LlamadasMixin):
         self._mudo = False
         self._mudo_hasta = 0.0
         self.pendiente = None
+        self.n_ordenes = 0           # órdenes terminadas (la sesión «un comando por Luna» se cierra al subir)
+        self.t_orden = 0.0
         self._abiertas = {}
         self._habla = {}
         self.bateria_preguntada = False
@@ -94,6 +96,9 @@ class Cerebro(VozMixin, DialogoMixin, AppsMixin, SistemaMixin, LlamadasMixin):
         with self._lock:
             if self.pendiente:
                 return self._responder_pendiente(tn, reg)
+            if tn in cfg.FRASES_CIERRE:                      # «ya está», «gracias»...: solo si es la frase entera
+                reg.update(via="cierre", accion="parar")
+                return self._ejecutar("parar", {}, False, reg, t0)
             cmd = self._buscar_comando(tn)
             if cmd:
                 reg.update(via="comando", accion=cmd["accion"])
@@ -253,6 +258,7 @@ class Cerebro(VozMixin, DialogoMixin, AppsMixin, SistemaMixin, LlamadasMixin):
                             "texto": reg.get("texto", ""), "frase_id": reg.get("id", ""),
                             "dur_ms": reg.get("ms", 0)})
         self.hablar(resp)
+        self.fin_orden()
         return resp
 
 

@@ -304,6 +304,9 @@ except ValueError:
 
 
 COLA = queue.Queue()
+PROC = {"n": 0}          # frases en cola o procesándose (mientras haya, la sesión no cuenta silencio)
+ESPERA_UNO = 8.0         # s sin hablar tras los que se cierra una sesión «un comando» (Luna / auricular)
+CIERRE_UNO = 1.5         # s tras terminar una orden (ya habló) para cerrar esa sesión
 DIAG = {"arranque": time.time(), "audio_fallos": 0, "audio_ultimo_fallo": 0.0, "audio_ultimo_ok": 0.0}   # para /diagnostico
 ACC = {"sid": secrets.token_hex(3), "n": 0, "items": []}   # acciones que la app Moon ejecuta
 VISTO = {"t": 0.0}                                          # ultima vez que la app pregunto /estado
@@ -349,6 +352,7 @@ def agregar(texto):
         E["finales"].append({"n": E["n"], "t": texto})
         E["finales"] = E["finales"][-50:]
         guardar({"tipo": "texto", "texto": texto})
+        PROC["n"] += 1
         COLA.put(texto)
 
 
@@ -371,6 +375,8 @@ def trabajador():
             CEREBRO.procesar(t)
         except Exception as e:
             acciones.log_evento({"tipo": "error", "donde": "procesar", "texto": t, "detalle": str(e)})
+        finally:
+            PROC["n"] = max(0, PROC["n"] - 1)
 
 
 def _recuperar_audio(fallos):
@@ -383,11 +389,12 @@ def _recuperar_audio(fallos):
         parar.wait(min(20.0, 2.0 * (fallos - REINTENTOS_AUDIO)))
 
 
-def escuchar(auto=False):
+def escuchar(auto=False, uno=False):
     rec = None
     p = None
     try:
         rec = KaldiRecognizer(model, 16000)
+        base = CEREBRO.n_ordenes
         ult = time.time()
         mudo = False
         fallos = 0
@@ -431,6 +438,15 @@ def escuchar(auto=False):
             if mudo:
                 rec.Reset()
                 mudo = False
+            if uno:                                # sesión «un comando por Luna»
+                if PROC["n"] > 0 or CEREBRO.pendiente is not None:
+                    ult = time.time()              # ejecutando una orden o esperando un sí/no: no es silencio
+                elif CEREBRO.n_ordenes > base and time.time() - CEREBRO.t_orden > CIERRE_UNO:
+                    acciones.log_evento({"tipo": "sesion_cerrada", "motivo": "orden"})
+                    break
+                elif time.time() - ult > ESPERA_UNO:
+                    acciones.log_evento({"tipo": "sesion_cerrada", "motivo": "silencio"})
+                    break
             lim = CEREBRO.limite_silencio(auto)
             if lim and time.time() - ult > lim:
                 break
@@ -467,13 +483,13 @@ def _hilo_vivo():
     return t is not None and (t.ident is None or t.is_alive())
 
 
-def iniciar_escucha(auto=False):
+def iniciar_escucha(auto=False, uno=False):
     with lock:
         ya = E["escuchando"] and _hilo_vivo()      # si la bandera quedo puesta sin hilo, se recupera sola
         if not ya:
             E["escuchando"] = True
             parar.clear()
-            t = threading.Thread(target=escuchar, args=(auto,), daemon=True)
+            t = threading.Thread(target=escuchar, args=(auto, uno), daemon=True)
             HILO["t"] = t
     if not ya:
         t.start()
@@ -640,8 +656,8 @@ class H(BaseHTTPRequestHandler):
         if not self._auth():
             return
         u = urlparse(self.path)
-        if self.path == "/escuchar":
-            iniciar_escucha()
+        if u.path == "/escuchar":
+            iniciar_escucha(uno=parse_qs(u.query).get("uno", ["0"])[0] == "1")
             self._j({"ok": True})
         elif u.path == "/apps":
             n = int(self.headers.get("Content-Length", 0) or 0)
